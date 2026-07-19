@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.name }}{% endblock %}
+{% block content %}
+
+<a href="/">&larr; back</a>
+<h2>{{ activity.name }}</h2>
+<p class="muted">
+    {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
+    &middot; {{ "%.2f"|format(activity.distance_m / 1000) }} km
+    {% if activity.duration_s %} &middot; {{ (activity.duration_s // 60)|int }} min{% endif %}
+    &middot; {{ activity.source }}
+</p>
+{% if activity.group_id %}
+<p><a href="/group/{{ activity.group_id }}">View {{ activity.group.activities|length - 1 }} other matched run(s) on this route &rarr;</a></p>
+{% else %}
+<p class="muted">No matches found yet for this route.</p>
+{% endif %}
+
+<div id="map" style="height: 480px;"></div>
+
+<script>
+const map = L.map('map');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+const pts = {{ activity.full_points | tojson }};
+const line = L.polyline(pts, {color: '#e6194b', weight: 4}).addTo(map);
+map.fitBounds(line.getBounds());
+</script>
+
+{% endblock %}

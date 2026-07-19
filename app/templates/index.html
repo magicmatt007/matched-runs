@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Matched Runs{% endblock %}
+{% block content %}
+
+<section class="panel">
+    <h2>Import activities</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data" class="row">
+        <input type="file" name="files" multiple accept=".gpx,.fit,.gz">
+        <button type="submit">Upload selected files</button>
+    </form>
+    <form action="/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
+        <input type="file" name="files" multiple webkitdirectory>
+        <button type="submit">Upload entire folder</button>
+    </form>
+    <p class="muted">Select as many files as you like at once — e.g. your whole
+        unzipped Garmin or Strava export folder (Strava: Settings &rarr; My
+        Account &rarr; Download or Delete Your Account &rarr; Request Your
+        Archive), or use "Upload entire folder" to pick the folder directly.
+        GPX and FIT files are supported, including gzip-compressed ones
+        (<code>.gpx.gz</code> / <code>.fit.gz</code>, as Strava's export uses).
+        Files without GPS data (indoor activities) are skipped automatically.</p>
+
+    <div class="row" style="margin-top: 10px;">
+        {% if strava_configured %}
+            {% if strava_connected %}
+                <form action="/strava/sync" method="post">
+                    <button type="submit">Sync from Strava</button>
+                </form>
+                <form action="/strava/disconnect" method="post">
+                    <button type="submit" class="secondary">Disconnect Strava</button>
+                </form>
+            {% else %}
+                <a class="button" href="/strava/login">Connect Strava</a>
+            {% endif %}
+        {% else %}
+            <span class="muted">Strava sync not configured (set STRAVA_CLIENT_ID / SECRET in .env to enable)</span>
+        {% endif %}
+
+        <form action="/rebuild" method="post">
+            <button type="submit" class="secondary">Recompute matches</button>
+        </form>
+    </div>
+    <p class="muted">{{ total_activities }} activities imported.</p>
+</section>
+
+<section class="panel">
+    <h2>Matched routes ({{ groups|length }})</h2>
+    {% if not groups %}
+        <p class="muted">No matched routes yet. Upload at least two GPX files covering the same route, or sync from Strava.</p>
+    {% endif %}
+    <div class="grid">
+        {% for g in groups %}
+        <a class="card" href="/group/{{ g.id }}">
+            <h3>{{ g.name }}</h3>
+            <p>{{ group_counts[g.id] }} runs matched</p>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+
+{% if ungrouped %}
+<section class="panel">
+    <h2>Unmatched activities ({{ ungrouped|length }})</h2>
+    <div class="grid">
+        {% for a in ungrouped %}
+        <a class="card" href="/activity/{{ a.id }}">
+            <h3>{{ a.name }}</h3>
+            <p>{{ "%.1f"|format(a.distance_m / 1000) }} km
+               {% if a.start_time %} &middot; {{ a.start_time.strftime("%Y-%m-%d") }}{% endif %}</p>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% endblock %}

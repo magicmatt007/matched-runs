@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }}{% endblock %}
+{% block content %}
+
+<a href="/">&larr; back</a>
+<h2>{{ group.name }}</h2>
+<p class="muted">{{ group.activities|length }} matched runs</p>
+
+<div id="map" style="height: 480px;"></div>
+
+<table class="table">
+    <thead><tr><th>Date</th><th>Name</th><th>Distance</th><th>Duration</th><th>Source</th></tr></thead>
+    <tbody>
+    {% for a in group.activities %}
+        <tr>
+            <td>{{ a.start_time.strftime("%Y-%m-%d") if a.start_time else "-" }}</td>
+            <td><a href="/activity/{{ a.id }}">{{ a.name }}</a></td>
+            <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
+            <td>{{ (a.duration_s // 60)|int if a.duration_s else "-" }} min</td>
+            <td>{{ a.source }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<script>
+const map = L.map('map');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+const colors = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#46f0f0','#f032e6','#bcf60c'];
+const bounds = [];
+{% for a in group.activities %}
+const pts_{{ loop.index }} = {{ a.full_points | tojson }};
+L.polyline(pts_{{ loop.index }}, {color: colors[{{ loop.index0 }} % colors.length], weight: 3, opacity: 0.7}).addTo(map);
+bounds.push(...pts_{{ loop.index }});
+{% endfor %}
+
+if (bounds.length) {
+    map.fitBounds(bounds);
+} else {
+    map.setView([0,0], 2);
+}
+</script>
+
+{% endblock %}
