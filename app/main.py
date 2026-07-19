@@ -2,9 +2,10 @@ import json
 import time
 import os
 import gzip
+import logging
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request, UploadFile, File, Depends
+from fastapi import FastAPI, Request, UploadFile, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,9 +16,13 @@ from app.database import Base, engine, get_db, run_migrations
 from app.models import Activity, RouteGroup, StravaToken
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
+from app.tcx_parser import parse_tcx_bytes
 from app.matcher import resample_track, rebuild_groups
 from app.polyline_util import decode_polyline
 from app import strava_client
+
+logger = logging.getLogger("matched_runs")
+logging.basicConfig(level=logging.INFO)
 
 Base.metadata.create_all(bind=engine)
 run_migrations()
@@ -67,6 +72,15 @@ def index(request: Request, db: Session = Depends(get_db)):
     total_activities = db.query(func.count(Activity.id)).scalar()
     strava_connected = db.query(StravaToken).first() is not None
 
+    upload_result = None
+    if "imported" in request.query_params:
+        upload_result = {
+            "imported": request.query_params.get("imported", "0"),
+            "skipped": request.query_params.get("skipped", "0"),
+            "duplicates": request.query_params.get("duplicates", "0"),
+            "unsupported": request.query_params.get("unsupported", "0"),
+        }
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "groups": groups,
@@ -75,13 +89,34 @@ def index(request: Request, db: Session = Depends(get_db)):
         "total_activities": total_activities,
         "strava_connected": strava_connected,
         "strava_configured": strava_client.is_configured(),
+        "upload_result": upload_result,
     })
 
 
 @app.post("/upload")
-async def upload_gpx(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
-    added, skipped = 0, 0
+async def upload_gpx(request: Request, db: Session = Depends(get_db)):
+    # FastAPI's default File(...) injection caps multipart requests at 1000
+    # files/fields as a DoS safeguard. Years of activity history easily
+    # exceeds that, so parse the form manually with a much higher ceiling -
+    # this is a personal, single-user app, so that tradeoff is fine here.
+    form = await request.form(max_files=50_000, max_fields=50_000)
+    files = form.getlist("files")
+    logger.info(
+        "Upload request received: %d form keys total, %d items under 'files'. Types: %s",
+        len(form.keys()), len(files), [type(x).__name__ for x in files[:5]],
+    )
+
+    added, skipped, duplicates, unsupported_ext = 0, 0, 0, 0
+    seen_extensions = set()
+
     for f in files:
+        # Duck-type instead of isinstance(f, UploadFile): depending on
+        # Starlette/FastAPI version, objects returned by request.form() may
+        # not be the exact same class object as the imported UploadFile,
+        # which would silently make isinstance() reject every file.
+        if not (hasattr(f, "filename") and hasattr(f, "read")):
+            logger.warning("Skipping non-file form field under 'files': %r", f)
+            continue
         content = await f.read()
         lower_name = (f.filename or "").lower()
 
@@ -89,38 +124,64 @@ async def upload_gpx(files: list[UploadFile] = File(...), db: Session = Depends(
         if lower_name.endswith(".gz"):
             try:
                 content = gzip.decompress(content)
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to gunzip %s: %s", f.filename, e)
                 skipped += 1
                 continue
             lower_name = lower_name[:-3]  # strip trailing ".gz"
+
+        ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
+        seen_extensions.add(ext)
 
         try:
             if lower_name.endswith(".fit"):
                 parsed = parse_fit_bytes(content, fallback_name=f.filename)
             elif lower_name.endswith(".gpx"):
                 parsed = parse_gpx_bytes(content, fallback_name=f.filename)
+            elif lower_name.endswith(".tcx"):
+                parsed = parse_tcx_bytes(content, fallback_name=f.filename)
             else:
+                unsupported_ext += 1
                 skipped += 1
                 continue
-        except Exception:
+        except Exception as e:
             # Corrupt file, indoor activity with no GPS, unsupported FIT
             # message layout, etc - skip it and keep processing the rest of
             # the batch rather than aborting the whole import.
+            logger.warning("Failed to parse %s: %s", f.filename, e)
             skipped += 1
             continue
 
+        if lower_name.endswith(".gpx"):
+            source = "gpx"
+        elif lower_name.endswith(".tcx"):
+            source = "tcx"
+        else:
+            source = "fit"
+
         activity = _save_activity(
-            db, source="gpx" if lower_name.endswith(".gpx") else "fit", external_id=f.filename,
+            db, source=source, external_id=f.filename,
             name=parsed["name"], points=parsed["points"],
             distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
             start_time=parsed["start_time"],
         )
         if activity:
             added += 1
+        else:
+            duplicates += 1  # already imported previously (same source + filename)
+
     db.commit()
     if added:
         rebuild_groups(db)
-    return RedirectResponse("/", status_code=303)
+
+    logger.info(
+        "Upload finished: %s added, %s skipped (%s unsupported extension, %s duplicates). Extensions seen: %s",
+        added, skipped, unsupported_ext, duplicates, sorted(seen_extensions),
+    )
+    return RedirectResponse(
+        f"/?imported={added}&skipped={skipped}&duplicates={duplicates}&unsupported={unsupported_ext}",
+        status_code=303,
+    )
 
 
 @app.get("/group/{group_id}", response_class=HTMLResponse)

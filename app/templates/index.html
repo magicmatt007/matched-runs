@@ -2,10 +2,28 @@
 {% block title %}Matched Runs{% endblock %}
 {% block content %}
 
+{% if upload_result %}
+<section class="panel" style="border-color: {% if upload_result.imported|int > 0 %}#3cb44b{% else %}#e6194b{% endif %};">
+    <h2>Upload result</h2>
+    <p>
+        <strong>{{ upload_result.imported }}</strong> imported,
+        <strong>{{ upload_result.duplicates }}</strong> already imported before,
+        <strong>{{ upload_result.skipped }}</strong> skipped
+        ({{ upload_result.unsupported }} had an unsupported file type).
+    </p>
+    {% if upload_result.imported|int == 0 %}
+    <p class="muted">Nothing was imported. Check the container logs
+        (<code>docker compose logs matched-runs</code>) — every skipped file is
+        logged there with the reason (unsupported extension, no GPS data,
+        parse error, etc).</p>
+    {% endif %}
+</section>
+{% endif %}
+
 <section class="panel">
     <h2>Import activities</h2>
     <form action="/upload" method="post" enctype="multipart/form-data" class="row">
-        <input type="file" name="files" multiple accept=".gpx,.fit,.gz">
+        <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz">
         <button type="submit">Upload selected files</button>
     </form>
     <form action="/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
@@ -16,9 +34,10 @@
         unzipped Garmin or Strava export folder (Strava: Settings &rarr; My
         Account &rarr; Download or Delete Your Account &rarr; Request Your
         Archive), or use "Upload entire folder" to pick the folder directly.
-        GPX and FIT files are supported, including gzip-compressed ones
-        (<code>.gpx.gz</code> / <code>.fit.gz</code>, as Strava's export uses).
-        Files without GPS data (indoor activities) are skipped automatically.</p>
+        GPX, FIT, and TCX are all supported, including gzip-compressed files
+        (<code>.gpx.gz</code> / <code>.fit.gz</code> / <code>.tcx.gz</code>,
+        as Strava's export uses). Files without GPS data (indoor activities)
+        are skipped automatically.</p>
 
     <div class="row" style="margin-top: 10px;">
         {% if strava_configured %}
