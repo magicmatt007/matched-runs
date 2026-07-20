@@ -18,6 +18,7 @@ RUN mkdir -p /code/app/static/vendor/leaflet/images && \
     curl -fsSL https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png -o /code/app/static/vendor/leaflet/images/marker-shadow.png
 
 COPY app ./app
+COPY garmin_login.py .
 
 RUN mkdir -p /data/gpx
 

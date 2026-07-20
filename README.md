@@ -15,7 +15,7 @@ configurable in `.env`.
 
 ## Getting your data in
 
-Three independent ways to import runs — use any combination:
+Four independent ways to import runs — use any combination:
 
 **1. Bulk import your whole history (recommended for existing data)**
 
@@ -50,6 +50,41 @@ Note: Strava's API returns a *simplified* polyline for each activity
 (`summary_polyline`), not the full-resolution track. This is precise enough
 for route matching, but the map view will look slightly less detailed than
 a raw GPX track.
+
+**4. Automatic Garmin sync (unofficial, ongoing)**
+
+Unlike the exports above (one-time history dumps), this checks your Garmin
+account periodically and imports new activities automatically, so you don't
+have to manually export/upload every run going forward.
+
+There's no public Garmin API for personal/hobbyist use — Garmin's official
+developer program is enterprise-only — so this works the same way tools like
+GarminDB do: it logs into your Garmin Connect account directly. Be aware this
+is unofficial and can break if Garmin changes their login flow (it has
+happened before). Treat it as convenient-but-not-guaranteed, and keep the
+manual GPX/FIT export path in mind as a fallback.
+
+Setup:
+1. Set `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `.env`.
+2. **If your Garmin account has MFA/2FA enabled** (recommended for security,
+   but it means a background job can't complete the login on its own), run
+   this once, interactively, before starting the app normally:
+   ```bash
+   docker compose run --rm -it matched-runs python garmin_login.py
+   ```
+   Follow the prompts (including entering your MFA code when asked). This
+   saves a session that's reused automatically afterwards — you shouldn't
+   need to do this again for about a year.
+3. If your account does *not* have MFA enabled, you can skip step 2 —
+   `GARMIN_EMAIL`/`GARMIN_PASSWORD` alone are enough.
+4. Start the app normally. It checks Garmin for new activities every
+   `GARMIN_SYNC_INTERVAL_MINUTES` (default 120), and there's also a "Sync
+   from Garmin now" button on the homepage for an on-demand check.
+
+If sync stops working after previously working fine, it's most likely Garmin
+having changed something on their end — check
+https://github.com/cyberjunky/python-garminconnect/issues for a fix/update
+before assuming something's misconfigured.
 
 ## Running it
 

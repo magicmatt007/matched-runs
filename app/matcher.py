@@ -17,12 +17,23 @@ Approach (similar in spirit to what Strava does for "matched runs"):
 import math
 import os
 import json
+from datetime import timedelta
 from app.models import Activity, RouteGroup
 
 RESAMPLE_POINTS = 40
 
 MATCH_DISTANCE_THRESHOLD_M = float(os.environ.get("MATCH_DISTANCE_THRESHOLD_M", 50))
 MATCH_LENGTH_TOLERANCE = float(os.environ.get("MATCH_LENGTH_TOLERANCE", 0.15))
+
+# When the same real-world activity gets imported from more than one source
+# (e.g. a bulk Strava export AND live Garmin sync both bringing in the same
+# hike), prefer whichever source has richer metadata - live API syncs give
+# you the actual title/type, raw file uploads often just have a filename.
+SOURCE_PRIORITY = {"garmin": 2, "strava": 2, "gpx": 1, "fit": 1, "tcx": 1}
+
+# How close two activities' start times need to be to even consider them the
+# same real-world activity (route geometry still has to match too).
+DUPLICATE_TIME_WINDOW = timedelta(minutes=20)
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -100,6 +111,71 @@ class UnionFind:
         ra, rb = self.find(a), self.find(b)
         if ra != rb:
             self.parent[ra] = rb
+
+
+def find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source):
+    """Look for an already-imported activity from a DIFFERENT source that's
+    almost certainly the same real-world activity: start time close together
+    and matching route geometry. Returns the existing Activity row, or None.
+    """
+    if start_time is None:
+        return None
+
+    candidates = (
+        db.query(Activity)
+        .filter(Activity.source != exclude_source)
+        .filter(Activity.start_time >= start_time - DUPLICATE_TIME_WINDOW)
+        .filter(Activity.start_time <= start_time + DUPLICATE_TIME_WINDOW)
+        .all()
+    )
+    if not candidates:
+        return None
+
+    new_resampled = resample_track(points)
+    new_len = distance_m or track_length(points)
+
+    for c in candidates:
+        c_pts = c.resampled_points
+        c_len = c.distance_m or track_length(c_pts)
+        if tracks_match(new_resampled, new_len, c_pts, c_len):
+            return c
+    return None
+
+
+def merge_duplicate_activities(db):
+    """One-off retroactive cleanup: scan everything already imported for
+    cross-source duplicates (same route, close start time) and merge them
+    down to a single row, keeping whichever source ranks higher in
+    SOURCE_PRIORITY. Returns the number of duplicate rows removed."""
+    activities = db.query(Activity).order_by(Activity.start_time).all()
+    to_delete = set()
+
+    for i in range(len(activities)):
+        a = activities[i]
+        if a.id in to_delete or a.start_time is None:
+            continue
+        for j in range(i + 1, len(activities)):
+            b = activities[j]
+            if b.id in to_delete or b.start_time is None:
+                continue
+            if a.source == b.source:
+                continue
+            if b.start_time - a.start_time > DUPLICATE_TIME_WINDOW:
+                break  # activities are ordered by start_time, nothing further can be within the window
+            a_pts, b_pts = a.resampled_points, b.resampled_points
+            a_len = a.distance_m or track_length(a_pts)
+            b_len = b.distance_m or track_length(b_pts)
+            if not tracks_match(a_pts, a_len, b_pts, b_len):
+                continue
+            keep, drop = (a, b) if SOURCE_PRIORITY.get(a.source, 0) >= SOURCE_PRIORITY.get(b.source, 0) else (b, a)
+            to_delete.add(drop.id)
+
+    if to_delete:
+        db.query(Activity).filter(Activity.id.in_(to_delete)).delete(synchronize_session=False)
+        db.commit()
+        rebuild_groups(db)
+
+    return len(to_delete)
 
 
 def rebuild_groups(db):

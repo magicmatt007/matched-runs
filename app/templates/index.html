@@ -59,8 +59,38 @@
         <form action="/rebuild" method="post">
             <button type="submit" class="secondary">Recompute matches</button>
         </form>
+        <form action="/dedupe" method="post">
+            <button type="submit" class="secondary">Merge duplicate activities</button>
+        </form>
     </div>
     <p class="muted">{{ total_activities }} activities imported.</p>
+</section>
+
+<section class="panel">
+    <h2>Garmin auto-sync</h2>
+    {% if garmin_configured %}
+        <p>
+            Automatic sync is <strong>on</strong> — checking for new activities
+            every {{ garmin_sync_interval }} minutes.
+            {% if garmin_has_session %}
+                A saved login session was found.
+            {% else %}
+                <span class="muted">No saved session found yet — if your account
+                has MFA/2FA enabled, run the one-time interactive login first:
+                <code>docker compose run --rm -it matched-runs python garmin_login.py</code></span>
+            {% endif %}
+        </p>
+        <form action="/garmin/sync" method="post">
+            <button type="submit">Sync from Garmin now</button>
+        </form>
+    {% else %}
+        <p class="muted">Not configured. Set <code>GARMIN_EMAIL</code> and
+            <code>GARMIN_PASSWORD</code> in <code>.env</code> to enable automatic
+            syncing of new activities from your Garmin account. This uses an
+            unofficial method (there's no public Garmin API for personal use),
+            so treat it as best-effort — it can break if Garmin changes their
+            login flow.</p>
+    {% endif %}
 </section>
 
 <section class="panel">

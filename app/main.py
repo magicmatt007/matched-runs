@@ -3,6 +3,7 @@ import time
 import os
 import gzip
 import logging
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, UploadFile, Depends
@@ -12,17 +13,20 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.database import Base, engine, get_db, run_migrations
-from app.models import Activity, RouteGroup, StravaToken
+from app.database import Base, engine, get_db, run_migrations, SessionLocal
+from app.models import Activity, RouteGroup, StravaToken, GarminSyncState
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
-from app.matcher import resample_track, rebuild_groups
+from app.matcher import resample_track, rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
 from app.polyline_util import decode_polyline
 from app import strava_client
+from app import garmin_client
 
 logger = logging.getLogger("matched_runs")
 logging.basicConfig(level=logging.INFO)
+
+GARMIN_SYNC_INTERVAL_MINUTES = int(os.environ.get("GARMIN_SYNC_INTERVAL_MINUTES", 120))
 
 Base.metadata.create_all(bind=engine)
 run_migrations()
@@ -52,6 +56,31 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             existing.name = name
             changed = True
         return ("updated" if changed else "unchanged", existing)
+
+    # Cross-source duplicate check: the same real-world activity imported
+    # from a different source (e.g. a bulk Strava export AND live Garmin
+    # sync both bringing in the same hike). Detected by close start time +
+    # matching route geometry, since sources sometimes disagree slightly on
+    # exact distance/duration.
+    dup = find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source=source)
+    if dup is not None:
+        if SOURCE_PRIORITY.get(source, 0) > SOURCE_PRIORITY.get(dup.source, 0):
+            # New source is richer (e.g. a live Garmin/Strava sync arriving
+            # after a raw file upload) - fold into the existing row instead
+            # of keeping two.
+            resampled = resample_track(points)
+            dup.source = source
+            dup.external_id = external_id
+            dup.name = name or dup.name
+            dup.activity_type = activity_type
+            dup.distance_m = distance_m
+            dup.duration_s = duration_s
+            dup.start_time = start_time
+            dup.full_points_json = json.dumps(points)
+            dup.resampled_points_json = json.dumps(resampled)
+            return ("updated", dup)
+        else:
+            return ("unchanged", dup)  # lower/equal priority source - discard the new one
 
     resampled = resample_track(points)
     activity = Activity(
@@ -136,6 +165,9 @@ def index(request: Request, db: Session = Depends(get_db)):
         "strava_connected": strava_connected,
         "strava_configured": strava_client.is_configured(),
         "upload_result": upload_result,
+        "garmin_configured": garmin_client.is_configured(),
+        "garmin_has_session": garmin_client.has_saved_session(),
+        "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
     })
 
 
@@ -264,6 +296,16 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
     return templates.TemplateResponse("activity.html", {"request": request, "activity": activity})
 
 
+@app.post("/dedupe")
+def dedupe_route(db: Session = Depends(get_db)):
+    removed = merge_duplicate_activities(db)
+    logger.info("Deduplication: merged/removed %d duplicate activities", removed)
+    return RedirectResponse(
+        f"/?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0",
+        status_code=303,
+    )
+
+
 @app.post("/rebuild")
 def rebuild(db: Session = Depends(get_db)):
     rebuild_groups(db)
@@ -381,3 +423,118 @@ def strava_sync(db: Session = Depends(get_db)):
     if added or updated:
         rebuild_groups(db)
     return RedirectResponse("/", status_code=303)
+
+
+# ---------------- Garmin Connect auto-sync (unofficial) ----------------
+
+def do_garmin_sync(db: Session):
+    """Shared by the manual 'Sync from Garmin' button and the background
+    loop. Returns (added, updated). Raises GarminAuthError on login failure."""
+    client = garmin_client.get_client()
+
+    sync_state = db.query(GarminSyncState).first()
+    last_checked = sync_state.last_checked_at if sync_state else None
+
+    new_activities = garmin_client.fetch_new_activities(client, after=last_checked)
+
+    added, updated = 0, 0
+    newest_seen = last_checked
+    for a in new_activities:
+        activity_id = a.get("activityId")
+        if not activity_id:
+            continue
+
+        # Advance the watermark for every activity we see, whether or not it
+        # ends up importable, so ones with no GPS data (strength training,
+        # indoor workouts, etc.) aren't retried on every future sync.
+        start_str = a.get("startTimeLocal") or a.get("startTimeGMT")
+        if start_str:
+            try:
+                start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+                if newest_seen is None or start_dt > newest_seen:
+                    newest_seen = start_dt
+            except ValueError:
+                pass
+
+        try:
+            gpx_bytes = garmin_client.download_gpx(client, activity_id)
+        except Exception as e:
+            logger.warning("Failed to download GPX for Garmin activity %s: %s", activity_id, e)
+            continue
+        try:
+            parsed = parse_gpx_bytes(gpx_bytes, fallback_name=str(activity_id))
+        except Exception as e:
+            logger.warning("Failed to parse GPX for Garmin activity %s: %s", activity_id, e)
+            continue
+
+        # Garmin Connect's own activity metadata is richer/more accurate
+        # than what's recoverable from the raw GPX (e.g. your actual title).
+        name = a.get("activityName") or parsed["name"]
+        activity_type = None
+        type_key = (a.get("activityType") or {}).get("typeKey")
+        if type_key:
+            activity_type = type_key.replace("_", " ").title()
+        distance_m = a.get("distance") or parsed["distance_m"]
+        duration_s = a.get("duration") or parsed["duration_s"]
+
+        status, _ = _save_activity(
+            db, source="garmin", external_id=str(activity_id),
+            name=name, points=parsed["points"], distance_m=distance_m,
+            duration_s=duration_s, start_time=parsed["start_time"],
+            activity_type=activity_type,
+        )
+        if status == "added":
+            added += 1
+        elif status == "updated":
+            updated += 1
+
+    if sync_state is None:
+        sync_state = GarminSyncState(last_checked_at=newest_seen)
+        db.add(sync_state)
+    else:
+        sync_state.last_checked_at = newest_seen
+
+    db.commit()
+    if added or updated:
+        rebuild_groups(db)
+    return added, updated
+
+
+@app.post("/garmin/sync")
+def garmin_sync_route(db: Session = Depends(get_db)):
+    try:
+        added, updated = do_garmin_sync(db)
+    except garmin_client.GarminAuthError as e:
+        return HTMLResponse(f"<p>{e}</p><p><a href='/'>back</a></p>", status_code=401)
+    return RedirectResponse(
+        f"/?imported={added}&updated={updated}&skipped=0&duplicates=0&unsupported=0",
+        status_code=303,
+    )
+
+
+async def _garmin_background_sync_loop():
+    while True:
+        await asyncio.sleep(GARMIN_SYNC_INTERVAL_MINUTES * 60)
+        if not garmin_client.is_configured():
+            continue
+        db = SessionLocal()
+        try:
+            added, updated = do_garmin_sync(db)
+            if added or updated:
+                logger.info("Background Garmin sync: %d added, %d updated", added, updated)
+        except garmin_client.GarminAuthError as e:
+            logger.warning("Background Garmin sync auth failed: %s", e)
+        except Exception as e:
+            logger.warning("Background Garmin sync failed: %s", e)
+        finally:
+            db.close()
+
+
+@app.on_event("startup")
+async def _start_background_tasks():
+    if garmin_client.is_configured():
+        logger.info(
+            "Garmin auto-sync enabled, running every %d minutes.",
+            GARMIN_SYNC_INTERVAL_MINUTES,
+        )
+        asyncio.create_task(_garmin_background_sync_loop())

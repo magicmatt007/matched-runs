@@ -58,3 +58,15 @@ class StravaToken(Base):
     expires_at = Column(Integer, nullable=False)  # unix timestamp
     athlete_id = Column(String, nullable=True)
     scope = Column(String, nullable=True)
+
+
+class GarminSyncState(Base):
+    """Single-row table tracking how far Garmin sync has checked, independent
+    of which activities were actually importable. Without this, activities
+    with no GPS data (strength training, indoor workouts, etc.) would get
+    re-fetched and re-attempted on every single sync forever, since a failed
+    import never advances a "last successfully imported" watermark."""
+    __tablename__ = "garmin_sync_state"
+
+    id = Column(Integer, primary_key=True)
+    last_checked_at = Column(DateTime, nullable=True)
