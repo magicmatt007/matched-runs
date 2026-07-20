@@ -27,7 +27,6 @@ def run_migrations():
     models but not yet in the actual sqlite table (SQLAlchemy's create_all()
     only creates missing tables, it never alters existing ones)."""
     import sqlite3
-    from app.models import StravaToken  # local import to avoid circular import at module load
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -36,10 +35,15 @@ def run_migrations():
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()}
 
-    if "strava_token" in tables:
-        existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(strava_token)").fetchall()}
-        if "scope" not in existing_cols:
-            cur.execute("ALTER TABLE strava_token ADD COLUMN scope VARCHAR")
+    def ensure_column(table, column, coltype_sql):
+        if table not in tables:
+            return
+        existing_cols = {row[1] for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing_cols:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_sql}")
             conn.commit()
+
+    ensure_column("strava_token", "scope", "VARCHAR")
+    ensure_column("activities", "activity_type", "VARCHAR DEFAULT 'Other'")
 
     conn.close()

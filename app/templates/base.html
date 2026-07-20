@@ -9,8 +9,9 @@
     <script src="/static/vendor/leaflet/leaflet.js"></script>
 </head>
 <body>
-    <header>
+    <header class="row" style="justify-content: space-between;">
         <a href="/" class="brand">Matched Runs</a>
+        <a href="/activities" style="color: var(--text); text-decoration: none;">All Activities</a>
     </header>
     <main>
         {% block content %}{% endblock %}

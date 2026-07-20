@@ -6,8 +6,10 @@
 <h2>{{ activity.name }}</h2>
 <p class="muted">
     {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
+    &middot; {{ activity.activity_type }}
     &middot; {{ "%.2f"|format(activity.distance_m / 1000) }} km
-    {% if activity.duration_s %} &middot; {{ (activity.duration_s // 60)|int }} min{% endif %}
+    &middot; {{ activity.duration_s | hms }}
+    &middot; {{ activity | pace }}
     &middot; {{ activity.source }}
 </p>
 {% if activity.group_id %}

@@ -3,15 +3,16 @@
 {% block content %}
 
 {% if upload_result %}
-<section class="panel" style="border-color: {% if upload_result.imported|int > 0 %}#3cb44b{% else %}#e6194b{% endif %};">
+<section class="panel" style="border-color: {% if upload_result.imported|int > 0 or upload_result.updated|int > 0 %}#3cb44b{% else %}#e6194b{% endif %};">
     <h2>Upload result</h2>
     <p>
-        <strong>{{ upload_result.imported }}</strong> imported,
-        <strong>{{ upload_result.duplicates }}</strong> already imported before,
+        <strong>{{ upload_result.imported }}</strong> newly imported,
+        <strong>{{ upload_result.updated }}</strong> updated (existing activity, new info picked up),
+        <strong>{{ upload_result.duplicates }}</strong> unchanged,
         <strong>{{ upload_result.skipped }}</strong> skipped
         ({{ upload_result.unsupported }} had an unsupported file type).
     </p>
-    {% if upload_result.imported|int == 0 %}
+    {% if upload_result.imported|int == 0 and upload_result.updated|int == 0 %}
     <p class="muted">Nothing was imported. Check the container logs
         (<code>docker compose logs matched-runs</code>) — every skipped file is
         logged there with the reason (unsupported extension, no GPS data,
@@ -84,7 +85,7 @@
         {% for a in ungrouped %}
         <a class="card" href="/activity/{{ a.id }}">
             <h3>{{ a.name }}</h3>
-            <p>{{ "%.1f"|format(a.distance_m / 1000) }} km
+            <p>{{ "%.1f"|format(a.distance_m / 1000) }} km &middot; {{ a.duration_s | hms }} &middot; {{ a | pace }}
                {% if a.start_time %} &middot; {{ a.start_time.strftime("%Y-%m-%d") }}{% endif %}</p>
         </a>
         {% endfor %}

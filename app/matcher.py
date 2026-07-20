@@ -119,6 +119,8 @@ def rebuild_groups(db):
     for i in range(len(activities)):
         for j in range(i + 1, len(activities)):
             a, b = activities[i], activities[j]
+            if (a.activity_type or "Other") != (b.activity_type or "Other"):
+                continue  # don't group e.g. a run with a bike ride on the same road
             a_pts, a_len = data[a.id]
             b_pts, b_len = data[b.id]
             if tracks_match(a_pts, a_len, b_pts, b_len):

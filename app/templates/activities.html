@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}All Activities{% endblock %}
+{% block content %}
+
+<a href="/">&larr; back</a>
+<h2>All activities</h2>
+
+<form method="get" action="/activities" class="row" style="margin: 12px 0;">
+    <label for="type" class="muted">Filter by type:</label>
+    <select name="type" id="type" onchange="this.form.submit()">
+        <option value="" {% if not selected_type %}selected{% endif %}>All types</option>
+        {% for t in types %}
+        <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <noscript><button type="submit">Apply</button></noscript>
+</form>
+
+<p class="muted">{{ activities|length }} activities</p>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Distance</th>
+            <th>Duration</th>
+            <th>Pace</th>
+            <th>Matched route</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for a in activities %}
+        <tr>
+            <td>{{ a.start_time.strftime("%Y-%m-%d") if a.start_time else "-" }}</td>
+            <td><a href="/activity/{{ a.id }}">{{ a.name }}</a></td>
+            <td>{{ a.activity_type }}</td>
+            <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
+            <td>{{ a.duration_s | hms }}</td>
+            <td>{{ a | pace }}</td>
+            <td>
+                {% if a.group_id %}
+                    <a href="/group/{{ a.group_id }}">{{ a.group.activities|length }} runs</a>
+                {% else %}
+                    <span class="muted">no match</span>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

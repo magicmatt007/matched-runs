@@ -32,6 +32,10 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
     if not name:
         name = fallback_name
 
+    activity_type = None
+    if gpx.tracks and gpx.tracks[0].type:
+        activity_type = gpx.tracks[0].type.replace("_", " ").title()
+
     try:
         distance_m = gpx.length_3d() or gpx.length_2d() or 0.0
     except Exception:
@@ -48,6 +52,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
 
     return {
         "name": name,
+        "activity_type": activity_type,
         "points": points,
         "distance_m": float(distance_m),
         "duration_s": duration_s,

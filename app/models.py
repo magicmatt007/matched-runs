@@ -21,9 +21,10 @@ class Activity(Base):
     __table_args__ = (UniqueConstraint("source", "external_id", name="uq_source_external_id"),)
 
     id = Column(Integer, primary_key=True)
-    source = Column(String, nullable=False)  # "gpx" or "strava"
+    source = Column(String, nullable=False)  # "gpx", "fit", "tcx", or "strava"
     external_id = Column(String, nullable=False)  # filename or strava activity id
     name = Column(String, default="Run")
+    activity_type = Column(String, nullable=False, default="Other")  # e.g. Run, Ride, Hike, Walk
     start_time = Column(DateTime, nullable=True)
     distance_m = Column(Float, default=0.0)
     duration_s = Column(Float, nullable=True)

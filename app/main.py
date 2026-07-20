@@ -33,16 +33,32 @@ templates = Jinja2Templates(directory="app/templates")
 
 
 def _save_activity(db: Session, source: str, external_id: str, name: str,
-                    points, distance_m: float, duration_s, start_time):
-    exists = db.query(Activity).filter_by(source=source, external_id=external_id).first()
-    if exists:
-        return None  # already imported
+                    points, distance_m: float, duration_s, start_time,
+                    activity_type: str = None):
+    """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
+    activity_type = activity_type or "Other"
+    existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
+
+    if existing:
+        # Re-imported (e.g. re-uploading the same export after an app update
+        # added new fields, such as activity_type). Backfill in place rather
+        # than silently skipping, so re-uploading is enough to pick up new
+        # fields without needing to wipe and reimport everything.
+        changed = False
+        if existing.activity_type != activity_type:
+            existing.activity_type = activity_type
+            changed = True
+        if name and existing.name != name:
+            existing.name = name
+            changed = True
+        return ("updated" if changed else "unchanged", existing)
 
     resampled = resample_track(points)
     activity = Activity(
         source=source,
         external_id=external_id,
         name=name or "Run",
+        activity_type=activity_type,
         start_time=start_time,
         distance_m=distance_m,
         duration_s=duration_s,
@@ -50,7 +66,36 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         resampled_points_json=json.dumps(resampled),
     )
     db.add(activity)
-    return activity
+    return ("added", activity)
+
+
+def format_duration_hms(seconds):
+    """1234.5 -> '00:20:34'"""
+    if seconds is None:
+        return "-"
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return "-"
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def format_pace(activity):
+    """Pace in min:sec per km, e.g. '5:12 /km'."""
+    if not activity.duration_s or not activity.distance_m:
+        return "-"
+    distance_km = activity.distance_m / 1000.0
+    if distance_km <= 0:
+        return "-"
+    pace_seconds_per_km = activity.duration_s / distance_km
+    m, s = divmod(int(round(pace_seconds_per_km)), 60)
+    return f"{m}:{s:02d} /km"
+
+
+templates.env.filters["hms"] = format_duration_hms
+templates.env.filters["pace"] = format_pace
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -76,6 +121,7 @@ def index(request: Request, db: Session = Depends(get_db)):
     if "imported" in request.query_params:
         upload_result = {
             "imported": request.query_params.get("imported", "0"),
+            "updated": request.query_params.get("updated", "0"),
             "skipped": request.query_params.get("skipped", "0"),
             "duplicates": request.query_params.get("duplicates", "0"),
             "unsupported": request.query_params.get("unsupported", "0"),
@@ -106,7 +152,7 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         len(form.keys()), len(files), [type(x).__name__ for x in files[:5]],
     )
 
-    added, skipped, duplicates, unsupported_ext = 0, 0, 0, 0
+    added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
     seen_extensions = set()
 
     for f in files:
@@ -159,29 +205,51 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         else:
             source = "fit"
 
-        activity = _save_activity(
+        status, activity = _save_activity(
             db, source=source, external_id=f.filename,
             name=parsed["name"], points=parsed["points"],
             distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
-            start_time=parsed["start_time"],
+            start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
         )
-        if activity:
+        if status == "added":
             added += 1
+        elif status == "updated":
+            updated += 1
         else:
-            duplicates += 1  # already imported previously (same source + filename)
+            unchanged += 1
 
     db.commit()
-    if added:
+    if added or updated:
         rebuild_groups(db)
 
     logger.info(
-        "Upload finished: %s added, %s skipped (%s unsupported extension, %s duplicates). Extensions seen: %s",
-        added, skipped, unsupported_ext, duplicates, sorted(seen_extensions),
+        "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
+        added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
     )
     return RedirectResponse(
-        f"/?imported={added}&skipped={skipped}&duplicates={duplicates}&unsupported={unsupported_ext}",
+        f"/?imported={added}&updated={updated}&skipped={skipped}"
+        f"&duplicates={unchanged}&unsupported={unsupported_ext}",
         status_code=303,
     )
+
+
+@app.get("/activities", response_class=HTMLResponse)
+def activities_list(request: Request, type: str = None, db: Session = Depends(get_db)):
+    query = db.query(Activity).order_by(Activity.start_time.desc())
+    if type:
+        query = query.filter(Activity.activity_type == type)
+    activities = query.all()
+
+    types = sorted({
+        row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
+    })
+
+    return templates.TemplateResponse("activities.html", {
+        "request": request,
+        "activities": activities,
+        "types": types,
+        "selected_type": type,
+    })
 
 
 @app.get("/group/{group_id}", response_class=HTMLResponse)
@@ -285,7 +353,7 @@ def strava_sync(db: Session = Depends(get_db)):
             status_code=401,
         )
 
-    added = 0
+    added, updated = 0, 0
     for a in activities:
         polyline = (a.get("map") or {}).get("summary_polyline")
         if not polyline:
@@ -299,15 +367,17 @@ def strava_sync(db: Session = Depends(get_db)):
                 start_time = datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).replace(tzinfo=None)
             except Exception:
                 pass
-        activity = _save_activity(
+        status, activity = _save_activity(
             db, source="strava", external_id=str(a["id"]),
             name=a.get("name", "Run"), points=points,
             distance_m=a.get("distance", 0.0), duration_s=a.get("moving_time"),
-            start_time=start_time,
+            start_time=start_time, activity_type=a.get("type"),
         )
-        if activity:
+        if status == "added":
             added += 1
+        elif status == "updated":
+            updated += 1
     db.commit()
-    if added:
+    if added or updated:
         rebuild_groups(db)
     return RedirectResponse("/", status_code=303)

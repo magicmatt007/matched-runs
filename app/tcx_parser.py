@@ -82,7 +82,8 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
         start_time = start_time.replace(tzinfo=None)
 
     return {
-        "name": sport or fallback_name,
+        "name": fallback_name,
+        "activity_type": sport,
         "points": points,
         "distance_m": last_distance or 0.0,
         "duration_s": duration_s,

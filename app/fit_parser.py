@@ -48,13 +48,15 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         if st and start_time is None:
             start_time = st
 
-    name = sport.replace("_", " ").title() if sport else fallback_name
+    name = fallback_name
+    activity_type = sport.replace("_", " ").title() if sport else None
 
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
     return {
         "name": name,
+        "activity_type": activity_type,
         "points": points,
         "distance_m": distance_m,
         "duration_s": duration_s,
