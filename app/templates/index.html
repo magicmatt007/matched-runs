@@ -66,9 +66,19 @@
             <button type="submit" class="secondary">Merge duplicate activities</button>
         </form>
         <form action="/normalize-types" method="post">
-            <button type="submit" class="secondary">Normalize activity types</button>
+            <button type="submit" class="secondary">Strip Garmin "V2" type suffixes</button>
         </form>
     </div>
+    <form action="/merge-legacy-types" method="post" class="row" style="margin-top: 10px;">
+        <label class="muted" for="cutoff_date">Merge legacy Hiking/Walking and Kayaking/Rowing types for activities before:</label>
+        <input type="date" name="cutoff_date" id="cutoff_date" value="2026-04-01">
+        <button type="submit" class="secondary">Merge legacy types</button>
+    </form>
+    <p class="muted" style="margin-top: 4px;">Useful if an old watch only
+        offered a limited choice of activity types, so the same real activity
+        got logged under different labels depending on which watch was in
+        use at the time. Only activities before the date you pick are
+        touched; anything after is left as-is.</p>
     <p class="muted">{{ total_activities }} activities imported.</p>
 </section>
 

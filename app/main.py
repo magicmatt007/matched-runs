@@ -6,7 +6,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request, UploadFile, Depends
+from fastapi import FastAPI, Request, UploadFile, Depends, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,7 +20,7 @@ from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
 from app.matcher import resample_track, rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
 from app.polyline_util import decode_polyline
-from app.type_normalize import normalize_activity_type
+from app.type_normalize import normalize_activity_type, merge_legacy_type
 from app.strava_csv import parse_strava_activities_csv
 from app import strava_client
 from app import garmin_client
@@ -42,7 +42,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     points, distance_m: float, duration_s, start_time,
                     activity_type: str = None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
-    activity_type = normalize_activity_type(activity_type or "Other", source)
+    activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
 
     if existing:
@@ -374,14 +374,49 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
 def normalize_types_route(db: Session = Depends(get_db)):
     changed = 0
     for act in db.query(Activity).all():
-        new_type = normalize_activity_type(act.activity_type, act.source)
+        new_type = normalize_activity_type(act.activity_type)
         if new_type != act.activity_type:
             act.activity_type = new_type
             changed += 1
     if changed:
         db.commit()
-        rebuild_groups(db)  # merged/renamed types can change which activities group together
-    logger.info("Type normalization: %d activities updated", changed)
+        rebuild_groups(db)  # renamed types can change which activities group together
+    logger.info("Type normalization (version suffixes): %d activities updated", changed)
+    return RedirectResponse(
+        f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0",
+        status_code=303,
+    )
+
+
+DEFAULT_LEGACY_TYPE_CUTOFF = "2026-04-01"
+
+
+@app.post("/merge-legacy-types")
+def merge_legacy_types_route(cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF), db: Session = Depends(get_db)):
+    try:
+        cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
+    except ValueError:
+        return HTMLResponse(
+            f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p><p><a href='/'>back</a></p>",
+            status_code=400,
+        )
+
+    changed = 0
+    activities = (
+        db.query(Activity)
+        .filter(Activity.start_time.isnot(None))
+        .filter(Activity.start_time < cutoff_dt)
+        .all()
+    )
+    for act in activities:
+        new_type = merge_legacy_type(act.activity_type)
+        if new_type != act.activity_type:
+            act.activity_type = new_type
+            changed += 1
+    if changed:
+        db.commit()
+        rebuild_groups(db)  # merged types can change which activities group together
+    logger.info("Legacy type merge (activities before %s): %d activities updated", cutoff_date, changed)
     return RedirectResponse(
         f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0",
         status_code=303,

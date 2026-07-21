@@ -103,16 +103,19 @@ All data (SQLite DB) is stored in `./data`, so it persists across restarts.
   control how strict matching is. Loosen them if similar-but-not-identical
   routes (e.g. a route with a couple of small variations) aren't matching;
   tighten them if unrelated routes are getting grouped.
-- The homepage has three cleanup buttons for data that predates a given
-  feature: **"Recompute matches"** re-runs route grouping from scratch;
+- The homepage has cleanup buttons for data that predates a given feature:
+  **"Recompute matches"** re-runs route grouping from scratch;
   **"Merge duplicate activities"** folds the same real activity imported
   from two sources (e.g. Strava export + Garmin sync) into one row, keeping
-  whichever source has richer metadata; **"Normalize activity types"**
-  strips Garmin's internal version suffixes (e.g. "Kayaking V2" →
-  "Kayaking") and merges legacy watch-limited type choices (e.g. an old
-  device that only offered "Walking", not "Hiking") into one canonical
-  type - only for non-Garmin sources, since a live Garmin sync already
-  reports today's real type correctly.
+  whichever source has richer metadata; **"Strip Garmin 'V2' type
+  suffixes"** removes Garmin's internal activity-type version suffixes
+  (e.g. "Kayaking V2" → "Kayaking"), which also happens automatically on
+  every future import. Separately, **"Merge legacy types"** merges
+  Hiking/Walking into "Hiking" and Kayaking/Rowing into "Kayaking" for
+  activities before a date you choose - this is deliberately manual and
+  date-scoped rather than automatic, since it reflects which watch you were
+  using at the time (older devices offering a more limited choice of
+  activity types), not which service the activity was imported through.
 - Uploading Strava's `activities.csv` (included in its full account export,
   alongside the `activities/` folder) recovers your real activity titles
   for anything that came from a raw GPX/FIT/TCX file - this works even if
