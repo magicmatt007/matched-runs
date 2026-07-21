@@ -20,6 +20,8 @@ from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
 from app.matcher import resample_track, rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
 from app.polyline_util import decode_polyline
+from app.type_normalize import normalize_activity_type
+from app.strava_csv import parse_strava_activities_csv
 from app import strava_client
 from app import garmin_client
 
@@ -40,7 +42,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     points, distance_m: float, duration_s, start_time,
                     activity_type: str = None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
-    activity_type = activity_type or "Other"
+    activity_type = normalize_activity_type(activity_type or "Other", source)
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
 
     if existing:
@@ -187,6 +189,25 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
     seen_extensions = set()
 
+    # Strava's bulk export includes a top-level activities.csv mapping each
+    # exported file to the title you actually gave it on Strava. If it's
+    # part of this upload, pull it out first and use it to name-override
+    # anything we're about to import (and anything already imported before).
+    name_overrides = {}
+    activity_files = []
+    for f in files:
+        if hasattr(f, "filename") and (f.filename or "").lower().endswith("activities.csv"):
+            try:
+                content = await f.read()
+                found = parse_strava_activities_csv(content)
+                name_overrides.update(found)
+                logger.info("Loaded %d titles from %s", len(found), f.filename)
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", f.filename, e)
+        else:
+            activity_files.append(f)
+    files = activity_files
+
     for f in files:
         # Duck-type instead of isinstance(f, UploadFile): depending on
         # Starlette/FastAPI version, objects returned by request.form() may
@@ -237,9 +258,12 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         else:
             source = "fit"
 
+        base_filename = (f.filename or "").rsplit("/", 1)[-1].strip().lower()
+        final_name = name_overrides.get(base_filename) or parsed["name"]
+
         status, activity = _save_activity(
             db, source=source, external_id=f.filename,
-            name=parsed["name"], points=parsed["points"],
+            name=final_name, points=parsed["points"],
             distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
             start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
         )
@@ -249,6 +273,17 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
             updated += 1
         else:
             unchanged += 1
+
+    # Backfill names on already-imported activities too, in case
+    # activities.csv was uploaded separately from (before or after) the
+    # actual activity files.
+    if name_overrides:
+        for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
+            base = (act.external_id or "").rsplit("/", 1)[-1].strip().lower()
+            better_name = name_overrides.get(base)
+            if better_name and act.name != better_name:
+                act.name = better_name
+                updated += 1
 
     db.commit()
     if added or updated:
@@ -265,12 +300,28 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     )
 
 
+PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+DEFAULT_PAGE_SIZE = 50
+
+
+def paginate(query, page: int, page_size: int):
+    page = max(page or 1, 1)
+    if not page_size or page_size not in PAGE_SIZE_OPTIONS:
+        page_size = DEFAULT_PAGE_SIZE
+    total = query.count()
+    total_pages = max(1, -(-total // page_size))  # ceil div
+    page = min(page, total_pages)
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    return items, page, total_pages, total, page_size
+
+
 @app.get("/activities", response_class=HTMLResponse)
-def activities_list(request: Request, type: str = None, db: Session = Depends(get_db)):
+def activities_list(request: Request, type: str = None, page: int = 1,
+                     page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
     query = db.query(Activity).order_by(Activity.start_time.desc())
     if type:
         query = query.filter(Activity.activity_type == type)
-    activities = query.all()
+    activities, page, total_pages, total, page_size = paginate(query, page, page_size)
 
     types = sorted({
         row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
@@ -281,19 +332,60 @@ def activities_list(request: Request, type: str = None, db: Session = Depends(ge
         "activities": activities,
         "types": types,
         "selected_type": type,
+        "page": page,
+        "total_pages": total_pages,
+        "total": total,
+        "page_size": page_size,
+        "page_size_options": PAGE_SIZE_OPTIONS,
     })
 
 
 @app.get("/group/{group_id}", response_class=HTMLResponse)
-def group_detail(group_id: int, request: Request, db: Session = Depends(get_db)):
+def group_detail(group_id: int, request: Request, page: int = 1,
+                  page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
     group = db.query(RouteGroup).filter_by(id=group_id).first()
-    return templates.TemplateResponse("group.html", {"request": request, "group": group})
+    if not group:
+        return RedirectResponse("/", status_code=303)
+
+    activities_query = (
+        db.query(Activity).filter_by(group_id=group_id).order_by(Activity.start_time.desc())
+    )
+    activities, page, total_pages, total, page_size = paginate(activities_query, page, page_size)
+
+    return templates.TemplateResponse("group.html", {
+        "request": request,
+        "group": group,
+        "activities": activities,
+        "page": page,
+        "total_pages": total_pages,
+        "total": total,
+        "page_size": page_size,
+        "page_size_options": PAGE_SIZE_OPTIONS,
+    })
 
 
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
 def activity_detail(activity_id: int, request: Request, db: Session = Depends(get_db)):
     activity = db.query(Activity).filter_by(id=activity_id).first()
     return templates.TemplateResponse("activity.html", {"request": request, "activity": activity})
+
+
+@app.post("/normalize-types")
+def normalize_types_route(db: Session = Depends(get_db)):
+    changed = 0
+    for act in db.query(Activity).all():
+        new_type = normalize_activity_type(act.activity_type, act.source)
+        if new_type != act.activity_type:
+            act.activity_type = new_type
+            changed += 1
+    if changed:
+        db.commit()
+        rebuild_groups(db)  # merged/renamed types can change which activities group together
+    logger.info("Type normalization: %d activities updated", changed)
+    return RedirectResponse(
+        f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0",
+        status_code=303,
+    )
 
 
 @app.post("/dedupe")

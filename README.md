@@ -103,6 +103,20 @@ All data (SQLite DB) is stored in `./data`, so it persists across restarts.
   control how strict matching is. Loosen them if similar-but-not-identical
   routes (e.g. a route with a couple of small variations) aren't matching;
   tighten them if unrelated routes are getting grouped.
+- The homepage has three cleanup buttons for data that predates a given
+  feature: **"Recompute matches"** re-runs route grouping from scratch;
+  **"Merge duplicate activities"** folds the same real activity imported
+  from two sources (e.g. Strava export + Garmin sync) into one row, keeping
+  whichever source has richer metadata; **"Normalize activity types"**
+  strips Garmin's internal version suffixes (e.g. "Kayaking V2" →
+  "Kayaking") and merges legacy watch-limited type choices (e.g. an old
+  device that only offered "Walking", not "Hiking") into one canonical
+  type - only for non-Garmin sources, since a live Garmin sync already
+  reports today's real type correctly.
+- Uploading Strava's `activities.csv` (included in its full account export,
+  alongside the `activities/` folder) recovers your real activity titles
+  for anything that came from a raw GPX/FIT/TCX file - this works even if
+  uploaded separately/later, to backfill names on what's already imported.
 - Matching recomputes over *all* activities every time you import new ones
   or click "Recompute matches". This is O(n²) but resampled tracks are only
   40 points each, so it stays fast into the low thousands of runs — fine

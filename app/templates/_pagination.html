@@ -1,0 +1,26 @@
+{% macro pagination_controls(page, total_pages, total, page_size, page_size_options, base_url, extra_params={}) %}
+<div class="row" style="justify-content: space-between; margin: 12px 0; flex-wrap: wrap;">
+    <div class="row">
+        <span class="muted">Page {{ page }} of {{ total_pages }} ({{ total }} total)</span>
+        {% if page > 1 %}
+            <a class="button" href="{{ base_url }}?page=1&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}">&laquo; First</a>
+            <a class="button" href="{{ base_url }}?page={{ page - 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}">&lsaquo; Prev</a>
+        {% endif %}
+        {% if page < total_pages %}
+            <a class="button" href="{{ base_url }}?page={{ page + 1 }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}">Next &rsaquo;</a>
+            <a class="button" href="{{ base_url }}?page={{ total_pages }}&page_size={{ page_size }}{% for k, v in extra_params.items() %}&{{ k }}={{ v }}{% endfor %}">Last &raquo;</a>
+        {% endif %}
+    </div>
+    <form method="get" action="{{ base_url }}" class="row">
+        {% for k, v in extra_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <input type="hidden" name="page" value="1">
+        <label class="muted" for="page_size">Per page:</label>
+        <select name="page_size" id="page_size" onchange="this.form.submit()">
+            {% for opt in page_size_options %}
+            <option value="{{ opt }}" {% if opt == page_size %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+        </select>
+        <noscript><button type="submit">Apply</button></noscript>
+    </form>
+</div>
+{% endmacro %}

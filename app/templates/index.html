@@ -24,7 +24,7 @@
 <section class="panel">
     <h2>Import activities</h2>
     <form action="/upload" method="post" enctype="multipart/form-data" class="row">
-        <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz">
+        <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz,.csv">
         <button type="submit">Upload selected files</button>
     </form>
     <form action="/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
@@ -37,8 +37,11 @@
         Archive), or use "Upload entire folder" to pick the folder directly.
         GPX, FIT, and TCX are all supported, including gzip-compressed files
         (<code>.gpx.gz</code> / <code>.fit.gz</code> / <code>.tcx.gz</code>,
-        as Strava's export uses). Files without GPS data (indoor activities)
-        are skipped automatically.</p>
+        as Strava's export uses). If your Strava export's top-level
+        <code>activities.csv</code> is included, your real Strava activity
+        titles are recovered automatically (works even if uploaded separately,
+        after the fact, to backfill names on what's already imported). Files
+        without GPS data (indoor activities) are skipped automatically.</p>
 
     <div class="row" style="margin-top: 10px;">
         {% if strava_configured %}
@@ -61,6 +64,9 @@
         </form>
         <form action="/dedupe" method="post">
             <button type="submit" class="secondary">Merge duplicate activities</button>
+        </form>
+        <form action="/normalize-types" method="post">
+            <button type="submit" class="secondary">Normalize activity types</button>
         </form>
     </div>
     <p class="muted">{{ total_activities }} activities imported.</p>
