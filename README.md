@@ -4,6 +4,25 @@ A self-hosted "matched runs" tool: it groups your runs by route, the same
 idea as Strava's paid "matched runs" feature, but free and running on your
 own machine.
 
+## Running as a Home Assistant app
+
+This same codebase can be installed as a Home Assistant app instead of (or
+alongside) plain `docker compose`:
+
+1. In Home Assistant: Settings → Add-ons → Add-on Store → ⋮ (top right) →
+   Repositories → add this repo's URL.
+2. Find "Matched Runs" in the store and install it.
+3. Configure any options you need (Garmin/Strava credentials, etc.) in the
+   app's Configuration tab - these map to the same environment variables
+   `.env` uses for the standalone deployment.
+4. Start it. Access it via the sidebar (ingress) for daily use, or the
+   direct port if you need Strava OAuth to work (see DOCS.md).
+
+The standalone `docker compose up` deployment described below is completely
+unaffected by this - both use the exact same Dockerfile and code, just two
+different ways of launching the same container.
+
+
 ## How matching works
 
 Each run's GPS track is resampled to 40 evenly-spaced points along its

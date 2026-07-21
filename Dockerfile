@@ -1,5 +1,15 @@
 FROM python:3.11-slim
 
+# These build args are supplied automatically by Home Assistant's Supervisor
+# when building this as an app; they're simply empty/unused for a plain
+# `docker compose build`, which is harmless.
+ARG BUILD_VERSION
+ARG BUILD_ARCH
+LABEL \
+    io.hass.version="${BUILD_VERSION}" \
+    io.hass.type="app" \
+    io.hass.arch="${BUILD_ARCH}"
+
 WORKDIR /code
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -19,9 +29,10 @@ RUN mkdir -p /code/app/static/vendor/leaflet/images && \
 
 COPY app ./app
 COPY garmin_login.py .
+COPY docker_entrypoint.py .
 
 RUN mkdir -p /data/gpx
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "docker_entrypoint.py"]

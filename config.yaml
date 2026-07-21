@@ -1,0 +1,48 @@
+name: "Matched Runs"
+version: "1.0.0"
+slug: "matched_runs"
+description: >-
+  Self-hosted route matching for GPS activities imported from Garmin/Strava -
+  groups runs (or rides, hikes, etc.) by route, the way Strava's paid
+  "matched runs" feature does, without the subscription.
+url: "https://github.com/YOUR_USERNAME/matched-runs"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: application
+boot: auto
+init: true
+
+# Ingress gives seamless access through the Home Assistant sidebar with no
+# port forwarding and no separate login. The app itself is unchanged - it
+# just needs to listen on a port, which it already does.
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:run
+
+# Also expose it on a fixed port. Not required for day-to-day use through
+# ingress, but Strava's OAuth flow needs a stable, fixed callback URL to
+# redirect back to - ingress URLs are dynamic per-session tokens, so
+# "Connect Strava" will only work reliably via this direct port, not
+# through ingress. Skip this if you don't use Strava sync.
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: "Direct web UI - only needed for Strava OAuth's callback URL"
+webui: "http://[HOST]:[PORT:8000]/"
+
+# /data is automatically provided as persistent storage by the Supervisor -
+# this app already uses /data for its SQLite database, so no extra `map`
+# entry is needed for that. Nothing else outside the container is required.
+
+options: {}
+schema:
+  garmin_email: "str?"
+  garmin_password: "password?"
+  garmin_sync_interval_minutes: "int?"
+  strava_client_id: "str?"
+  strava_client_secret: "str?"
+  strava_redirect_uri: "url?"
+  match_distance_threshold_m: "int?"
+  match_length_tolerance: "float?"
