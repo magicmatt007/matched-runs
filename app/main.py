@@ -18,7 +18,13 @@ from app.models import Activity, RouteGroup, StravaToken, GarminSyncState
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
-from app.matcher import resample_track, rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
+from app.matcher import (
+    resample_track,
+    rebuild_groups,
+    find_cross_source_duplicate,
+    merge_duplicate_activities,
+    SOURCE_PRIORITY,
+)
 from app.polyline_util import decode_polyline
 from app.type_normalize import normalize_activity_type, merge_legacy_type
 from app.strava_csv import parse_strava_activities_csv
@@ -38,12 +44,39 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
-def _save_activity(db: Session, source: str, external_id: str, name: str,
-                    points, distance_m: float, duration_s, start_time,
-                    activity_type: str = None):
+def ingress_prefix(request: Request) -> str:
+    """Home Assistant's ingress proxy serves this app under a dynamic
+    per-session path (e.g. /api/hassio_ingress/<token>), passed via this
+    header on every proxied request. Empty string when not behind ingress,
+    i.e. standalone docker compose - so nothing changes for that case."""
+    return request.headers.get("x-ingress-path", "")
+
+
+def local_redirect(
+    request: Request, path: str, status_code: int = 303
+) -> RedirectResponse:
+    """Use this instead of a bare RedirectResponse(path) for any redirect
+    targeting a path within this app, so the browser doesn't get bounced
+    out of the ingress session when running under Home Assistant."""
+    return RedirectResponse(ingress_prefix(request) + path, status_code=status_code)
+
+
+def _save_activity(
+    db: Session,
+    source: str,
+    external_id: str,
+    name: str,
+    points,
+    distance_m: float,
+    duration_s,
+    start_time,
+    activity_type: str = None,
+):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
-    existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
+    existing = (
+        db.query(Activity).filter_by(source=source, external_id=external_id).first()
+    )
 
     if existing:
         # Re-imported (e.g. re-uploading the same export after an app update
@@ -64,7 +97,9 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     # sync both bringing in the same hike). Detected by close start time +
     # matching route geometry, since sources sometimes disagree slightly on
     # exact distance/duration.
-    dup = find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source=source)
+    dup = find_cross_source_duplicate(
+        db, points, distance_m, start_time, exclude_source=source
+    )
     if dup is not None:
         if SOURCE_PRIORITY.get(source, 0) > SOURCE_PRIORITY.get(dup.source, 0):
             # New source is richer (e.g. a live Garmin/Strava sync arriving
@@ -82,7 +117,10 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             dup.resampled_points_json = json.dumps(resampled)
             return ("updated", dup)
         else:
-            return ("unchanged", dup)  # lower/equal priority source - discard the new one
+            return (
+                "unchanged",
+                dup,
+            )  # lower/equal priority source - discard the new one
 
     resampled = resample_track(points)
     activity = Activity(
@@ -131,11 +169,7 @@ templates.env.filters["pace"] = format_pace
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(get_db)):
-    groups = (
-        db.query(RouteGroup)
-        .order_by(RouteGroup.avg_distance_m.desc())
-        .all()
-    )
+    groups = db.query(RouteGroup).order_by(RouteGroup.avg_distance_m.desc()).all()
     group_counts = {g.id: len(g.activities) for g in groups}
     groups = sorted(groups, key=lambda g: group_counts[g.id], reverse=True)
 
@@ -158,19 +192,22 @@ def index(request: Request, db: Session = Depends(get_db)):
             "unsupported": request.query_params.get("unsupported", "0"),
         }
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "groups": groups,
-        "group_counts": group_counts,
-        "ungrouped": ungrouped,
-        "total_activities": total_activities,
-        "strava_connected": strava_connected,
-        "strava_configured": strava_client.is_configured(),
-        "upload_result": upload_result,
-        "garmin_configured": garmin_client.is_configured(),
-        "garmin_has_session": garmin_client.has_saved_session(),
-        "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "groups": groups,
+            "group_counts": group_counts,
+            "ungrouped": ungrouped,
+            "total_activities": total_activities,
+            "strava_connected": strava_connected,
+            "strava_configured": strava_client.is_configured(),
+            "upload_result": upload_result,
+            "garmin_configured": garmin_client.is_configured(),
+            "garmin_has_session": garmin_client.has_saved_session(),
+            "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
+        },
+    )
 
 
 @app.post("/upload")
@@ -183,7 +220,9 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     files = form.getlist("files")
     logger.info(
         "Upload request received: %d form keys total, %d items under 'files'. Types: %s",
-        len(form.keys()), len(files), [type(x).__name__ for x in files[:5]],
+        len(form.keys()),
+        len(files),
+        [type(x).__name__ for x in files[:5]],
     )
 
     added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
@@ -196,7 +235,9 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     name_overrides = {}
     activity_files = []
     for f in files:
-        if hasattr(f, "filename") and (f.filename or "").lower().endswith("activities.csv"):
+        if hasattr(f, "filename") and (f.filename or "").lower().endswith(
+            "activities.csv"
+        ):
             try:
                 content = await f.read()
                 found = parse_strava_activities_csv(content)
@@ -262,10 +303,15 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         final_name = name_overrides.get(base_filename) or parsed["name"]
 
         status, activity = _save_activity(
-            db, source=source, external_id=f.filename,
-            name=final_name, points=parsed["points"],
-            distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
-            start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
+            db,
+            source=source,
+            external_id=f.filename,
+            name=final_name,
+            points=parsed["points"],
+            distance_m=parsed["distance_m"],
+            duration_s=parsed["duration_s"],
+            start_time=parsed["start_time"],
+            activity_type=parsed.get("activity_type"),
         )
         if status == "added":
             added += 1
@@ -278,7 +324,9 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     # activities.csv was uploaded separately from (before or after) the
     # actual activity files.
     if name_overrides:
-        for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
+        for act in (
+            db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all()
+        ):
             base = (act.external_id or "").rsplit("/", 1)[-1].strip().lower()
             better_name = name_overrides.get(base)
             if better_name and act.name != better_name:
@@ -291,12 +339,17 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
 
     logger.info(
         "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
-        added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
+        added,
+        updated,
+        unchanged,
+        skipped,
+        unsupported_ext,
+        sorted(seen_extensions),
     )
-    return RedirectResponse(
+    return local_redirect(
+        request,
         f"/?imported={added}&updated={updated}&skipped={skipped}"
         f"&duplicates={unchanged}&unsupported={unsupported_ext}",
-        status_code=303,
     )
 
 
@@ -316,62 +369,84 @@ def paginate(query, page: int, page_size: int):
 
 
 @app.get("/activities", response_class=HTMLResponse)
-def activities_list(request: Request, type: str = None, page: int = 1,
-                     page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
+def activities_list(
+    request: Request,
+    type: str = None,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    db: Session = Depends(get_db),
+):
     query = db.query(Activity).order_by(Activity.start_time.desc())
     if type:
         query = query.filter(Activity.activity_type == type)
     activities, page, total_pages, total, page_size = paginate(query, page, page_size)
 
-    types = sorted({
-        row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
-    })
+    types = sorted(
+        {row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]}
+    )
 
-    return templates.TemplateResponse("activities.html", {
-        "request": request,
-        "activities": activities,
-        "types": types,
-        "selected_type": type,
-        "page": page,
-        "total_pages": total_pages,
-        "total": total,
-        "page_size": page_size,
-        "page_size_options": PAGE_SIZE_OPTIONS,
-    })
+    return templates.TemplateResponse(
+        "activities.html",
+        {
+            "request": request,
+            "activities": activities,
+            "types": types,
+            "selected_type": type,
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+            "page_size": page_size,
+            "page_size_options": PAGE_SIZE_OPTIONS,
+        },
+    )
 
 
 @app.get("/group/{group_id}", response_class=HTMLResponse)
-def group_detail(group_id: int, request: Request, page: int = 1,
-                  page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
+def group_detail(
+    group_id: int,
+    request: Request,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    db: Session = Depends(get_db),
+):
     group = db.query(RouteGroup).filter_by(id=group_id).first()
     if not group:
-        return RedirectResponse("/", status_code=303)
+        return local_redirect(request, "/")
 
     activities_query = (
-        db.query(Activity).filter_by(group_id=group_id).order_by(Activity.start_time.desc())
+        db.query(Activity)
+        .filter_by(group_id=group_id)
+        .order_by(Activity.start_time.desc())
     )
-    activities, page, total_pages, total, page_size = paginate(activities_query, page, page_size)
+    activities, page, total_pages, total, page_size = paginate(
+        activities_query, page, page_size
+    )
 
-    return templates.TemplateResponse("group.html", {
-        "request": request,
-        "group": group,
-        "activities": activities,
-        "page": page,
-        "total_pages": total_pages,
-        "total": total,
-        "page_size": page_size,
-        "page_size_options": PAGE_SIZE_OPTIONS,
-    })
+    return templates.TemplateResponse(
+        "group.html",
+        {
+            "request": request,
+            "group": group,
+            "activities": activities,
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+            "page_size": page_size,
+            "page_size_options": PAGE_SIZE_OPTIONS,
+        },
+    )
 
 
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
 def activity_detail(activity_id: int, request: Request, db: Session = Depends(get_db)):
     activity = db.query(Activity).filter_by(id=activity_id).first()
-    return templates.TemplateResponse("activity.html", {"request": request, "activity": activity})
+    return templates.TemplateResponse(
+        "activity.html", {"request": request, "activity": activity}
+    )
 
 
 @app.post("/normalize-types")
-def normalize_types_route(db: Session = Depends(get_db)):
+def normalize_types_route(request: Request, db: Session = Depends(get_db)):
     changed = 0
     for act in db.query(Activity).all():
         new_type = normalize_activity_type(act.activity_type)
@@ -382,9 +457,8 @@ def normalize_types_route(db: Session = Depends(get_db)):
         db.commit()
         rebuild_groups(db)  # renamed types can change which activities group together
     logger.info("Type normalization (version suffixes): %d activities updated", changed)
-    return RedirectResponse(
-        f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0",
-        status_code=303,
+    return local_redirect(
+        request, f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0"
     )
 
 
@@ -392,12 +466,17 @@ DEFAULT_LEGACY_TYPE_CUTOFF = "2026-04-01"
 
 
 @app.post("/merge-legacy-types")
-def merge_legacy_types_route(cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF), db: Session = Depends(get_db)):
+def merge_legacy_types_route(
+    request: Request,
+    cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF),
+    db: Session = Depends(get_db),
+):
     try:
         cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
     except ValueError:
         return HTMLResponse(
-            f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p><p><a href='/'>back</a></p>",
+            f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p>"
+            f"<p><a href='{ingress_prefix(request)}/'>back</a></p>",
             status_code=400,
         )
 
@@ -416,48 +495,60 @@ def merge_legacy_types_route(cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF)
     if changed:
         db.commit()
         rebuild_groups(db)  # merged types can change which activities group together
-    logger.info("Legacy type merge (activities before %s): %d activities updated", cutoff_date, changed)
-    return RedirectResponse(
-        f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0",
-        status_code=303,
+    logger.info(
+        "Legacy type merge (activities before %s): %d activities updated",
+        cutoff_date,
+        changed,
+    )
+    return local_redirect(
+        request, f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0"
     )
 
 
 @app.post("/dedupe")
-def dedupe_route(db: Session = Depends(get_db)):
+def dedupe_route(request: Request, db: Session = Depends(get_db)):
     removed = merge_duplicate_activities(db)
     logger.info("Deduplication: merged/removed %d duplicate activities", removed)
-    return RedirectResponse(
-        f"/?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0",
-        status_code=303,
+    return local_redirect(
+        request, f"/?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0"
     )
 
 
 @app.post("/rebuild")
-def rebuild(db: Session = Depends(get_db)):
+def rebuild(request: Request, db: Session = Depends(get_db)):
     rebuild_groups(db)
-    return RedirectResponse("/", status_code=303)
+    return local_redirect(request, "/")
 
 
 # ---------------- Strava OAuth + sync ----------------
+
 
 @app.get("/strava/login")
 def strava_login():
     if not strava_client.is_configured():
         return HTMLResponse(
-            "Strava API not configured. Set STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET in .env", status_code=400
+            "Strava API not configured. Set STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET in .env",
+            status_code=400,
         )
+    # External redirect to Strava's own site - no ingress-path fix needed here.
     return RedirectResponse(strava_client.get_authorize_url())
 
 
 @app.get("/strava/callback")
-def strava_callback(code: str = None, error: str = None, scope: str = None, db: Session = Depends(get_db)):
+def strava_callback(
+    request: Request,
+    code: str = None,
+    error: str = None,
+    scope: str = None,
+    db: Session = Depends(get_db),
+):
     if error or not code:
-        return RedirectResponse("/", status_code=303)
+        return local_redirect(request, "/")
 
     data = strava_client.exchange_code_for_token(code)
 
     if not scope or "activity:read_all" not in scope:
+        prefix = ingress_prefix(request)
         return HTMLResponse(
             "<p>Strava did not grant the <code>activity:read_all</code> permission "
             f"(granted scope: <code>{scope}</code>).</p>"
@@ -465,7 +556,7 @@ def strava_callback(code: str = None, error: str = None, scope: str = None, db: 
             "narrower scope, and Strava is silently reusing that old grant. Fix: "
             "go to <a href='https://www.strava.com/settings/apps' target='_blank'>"
             "strava.com/settings/apps</a>, revoke access for this app, then "
-            "<a href='/strava/login'>connect again</a>.</p>",
+            f"<a href='{prefix}/strava/login'>connect again</a>.</p>",
             status_code=400,
         )
 
@@ -485,21 +576,21 @@ def strava_callback(code: str = None, error: str = None, scope: str = None, db: 
         token.expires_at = data["expires_at"]
         token.scope = scope
     db.commit()
-    return RedirectResponse("/", status_code=303)
+    return local_redirect(request, "/")
 
 
 @app.post("/strava/disconnect")
-def strava_disconnect(db: Session = Depends(get_db)):
+def strava_disconnect(request: Request, db: Session = Depends(get_db)):
     db.query(StravaToken).delete()
     db.commit()
-    return RedirectResponse("/", status_code=303)
+    return local_redirect(request, "/")
 
 
 @app.post("/strava/sync")
-def strava_sync(db: Session = Depends(get_db)):
+def strava_sync(request: Request, db: Session = Depends(get_db)):
     token = db.query(StravaToken).first()
     if not token:
-        return RedirectResponse("/", status_code=303)
+        return local_redirect(request, "/")
 
     try:
         access_token = strava_client.ensure_valid_token(token)
@@ -511,14 +602,15 @@ def strava_sync(db: Session = Depends(get_db)):
         # broken token forever.
         db.query(StravaToken).delete()
         db.commit()
+        prefix = ingress_prefix(request)
         return HTMLResponse(
             f"<p>{e}</p>"
             "<p>Your stored Strava connection was cleared. Please "
-            "<a href='/strava/login'>connect Strava</a> again — if this keeps "
+            f"<a href='{prefix}/strava/login'>connect Strava</a> again — if this keeps "
             "happening, also revoke the app at "
             "<a href='https://www.strava.com/settings/apps' target='_blank'>"
             "strava.com/settings/apps</a> first, then reconnect.</p>"
-            "<p><a href='/'>back</a></p>",
+            f"<p><a href='{prefix}/'>back</a></p>",
             status_code=401,
         )
 
@@ -533,14 +625,21 @@ def strava_sync(db: Session = Depends(get_db)):
         start_time = None
         if a.get("start_date"):
             try:
-                start_time = datetime.fromisoformat(a["start_date"].replace("Z", "+00:00")).replace(tzinfo=None)
+                start_time = datetime.fromisoformat(
+                    a["start_date"].replace("Z", "+00:00")
+                ).replace(tzinfo=None)
             except Exception:
                 pass
         status, activity = _save_activity(
-            db, source="strava", external_id=str(a["id"]),
-            name=a.get("name", "Run"), points=points,
-            distance_m=a.get("distance", 0.0), duration_s=a.get("moving_time"),
-            start_time=start_time, activity_type=a.get("type"),
+            db,
+            source="strava",
+            external_id=str(a["id"]),
+            name=a.get("name", "Run"),
+            points=points,
+            distance_m=a.get("distance", 0.0),
+            duration_s=a.get("moving_time"),
+            start_time=start_time,
+            activity_type=a.get("type"),
         )
         if status == "added":
             added += 1
@@ -549,10 +648,11 @@ def strava_sync(db: Session = Depends(get_db)):
     db.commit()
     if added or updated:
         rebuild_groups(db)
-    return RedirectResponse("/", status_code=303)
+    return local_redirect(request, "/")
 
 
 # ---------------- Garmin Connect auto-sync (unofficial) ----------------
+
 
 def do_garmin_sync(db: Session):
     """Shared by the manual 'Sync from Garmin' button and the background
@@ -586,12 +686,16 @@ def do_garmin_sync(db: Session):
         try:
             gpx_bytes = garmin_client.download_gpx(client, activity_id)
         except Exception as e:
-            logger.warning("Failed to download GPX for Garmin activity %s: %s", activity_id, e)
+            logger.warning(
+                "Failed to download GPX for Garmin activity %s: %s", activity_id, e
+            )
             continue
         try:
             parsed = parse_gpx_bytes(gpx_bytes, fallback_name=str(activity_id))
         except Exception as e:
-            logger.warning("Failed to parse GPX for Garmin activity %s: %s", activity_id, e)
+            logger.warning(
+                "Failed to parse GPX for Garmin activity %s: %s", activity_id, e
+            )
             continue
 
         # Garmin Connect's own activity metadata is richer/more accurate
@@ -605,9 +709,14 @@ def do_garmin_sync(db: Session):
         duration_s = a.get("duration") or parsed["duration_s"]
 
         status, _ = _save_activity(
-            db, source="garmin", external_id=str(activity_id),
-            name=name, points=parsed["points"], distance_m=distance_m,
-            duration_s=duration_s, start_time=parsed["start_time"],
+            db,
+            source="garmin",
+            external_id=str(activity_id),
+            name=name,
+            points=parsed["points"],
+            distance_m=distance_m,
+            duration_s=duration_s,
+            start_time=parsed["start_time"],
             activity_type=activity_type,
         )
         if status == "added":
@@ -628,14 +737,17 @@ def do_garmin_sync(db: Session):
 
 
 @app.post("/garmin/sync")
-def garmin_sync_route(db: Session = Depends(get_db)):
+def garmin_sync_route(request: Request, db: Session = Depends(get_db)):
     try:
         added, updated = do_garmin_sync(db)
     except garmin_client.GarminAuthError as e:
-        return HTMLResponse(f"<p>{e}</p><p><a href='/'>back</a></p>", status_code=401)
-    return RedirectResponse(
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            f"<p>{e}</p><p><a href='{prefix}/'>back</a></p>", status_code=401
+        )
+    return local_redirect(
+        request,
         f"/?imported={added}&updated={updated}&skipped=0&duplicates=0&unsupported=0",
-        status_code=303,
     )
 
 
@@ -648,7 +760,9 @@ async def _garmin_background_sync_loop():
         try:
             added, updated = do_garmin_sync(db)
             if added or updated:
-                logger.info("Background Garmin sync: %d added, %d updated", added, updated)
+                logger.info(
+                    "Background Garmin sync: %d added, %d updated", added, updated
+                )
         except garmin_client.GarminAuthError as e:
             logger.warning("Background Garmin sync auth failed: %s", e)
         except Exception as e:

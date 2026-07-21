@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% set base_path = request.headers.get('X-Ingress-Path', '') %}
 {% block title %}{{ activity.name }}{% endblock %}
 {% block content %}
 
-<a href="/">&larr; back</a>
+<a href="{{ base_path }}/">&larr; back</a>
 <h2>{{ activity.name }}</h2>
 <p class="muted">
     {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
@@ -13,7 +14,7 @@
     &middot; {{ activity.source }}
 </p>
 {% if activity.group_id %}
-<p><a href="/group/{{ activity.group_id }}">View {{ activity.group.activities|length - 1 }} other matched run(s) on this route &rarr;</a></p>
+<p><a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ activity.group.activities|length - 1 }} other matched run(s) on this route &rarr;</a></p>
 {% else %}
 <p class="muted">No matches found yet for this route.</p>
 {% endif %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set base_path = request.headers.get('X-Ingress-Path', '') %}
 {% block title %}Matched Runs{% endblock %}
 {% block content %}
 
@@ -23,11 +24,11 @@
 
 <section class="panel">
     <h2>Import activities</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data" class="row">
+    <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row">
         <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz,.csv">
         <button type="submit">Upload selected files</button>
     </form>
-    <form action="/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
+    <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
         <input type="file" name="files" multiple webkitdirectory>
         <button type="submit">Upload entire folder</button>
     </form>
@@ -46,30 +47,30 @@
     <div class="row" style="margin-top: 10px;">
         {% if strava_configured %}
             {% if strava_connected %}
-                <form action="/strava/sync" method="post">
+                <form action="{{ base_path }}/strava/sync" method="post">
                     <button type="submit">Sync from Strava</button>
                 </form>
-                <form action="/strava/disconnect" method="post">
+                <form action="{{ base_path }}/strava/disconnect" method="post">
                     <button type="submit" class="secondary">Disconnect Strava</button>
                 </form>
             {% else %}
-                <a class="button" href="/strava/login">Connect Strava</a>
+                <a class="button" href="{{ base_path }}/strava/login">Connect Strava</a>
             {% endif %}
         {% else %}
             <span class="muted">Strava sync not configured (set STRAVA_CLIENT_ID / SECRET in .env to enable)</span>
         {% endif %}
 
-        <form action="/rebuild" method="post">
+        <form action="{{ base_path }}/rebuild" method="post">
             <button type="submit" class="secondary">Recompute matches</button>
         </form>
-        <form action="/dedupe" method="post">
+        <form action="{{ base_path }}/dedupe" method="post">
             <button type="submit" class="secondary">Merge duplicate activities</button>
         </form>
-        <form action="/normalize-types" method="post">
+        <form action="{{ base_path }}/normalize-types" method="post">
             <button type="submit" class="secondary">Strip Garmin "V2" type suffixes</button>
         </form>
     </div>
-    <form action="/merge-legacy-types" method="post" class="row" style="margin-top: 10px;">
+    <form action="{{ base_path }}/merge-legacy-types" method="post" class="row" style="margin-top: 10px;">
         <label class="muted" for="cutoff_date">Merge legacy Hiking/Walking and Kayaking/Rowing types for activities before:</label>
         <input type="date" name="cutoff_date" id="cutoff_date" value="2026-04-01">
         <button type="submit" class="secondary">Merge legacy types</button>
@@ -96,7 +97,7 @@
                 <code>docker compose run --rm -it matched-runs python garmin_login.py</code></span>
             {% endif %}
         </p>
-        <form action="/garmin/sync" method="post">
+        <form action="{{ base_path }}/garmin/sync" method="post">
             <button type="submit">Sync from Garmin now</button>
         </form>
     {% else %}
@@ -116,7 +117,7 @@
     {% endif %}
     <div class="grid">
         {% for g in groups %}
-        <a class="card" href="/group/{{ g.id }}">
+        <a class="card" href="{{ base_path }}/group/{{ g.id }}">
             <h3>{{ g.name }}</h3>
             <p>{{ group_counts[g.id] }} runs matched</p>
         </a>
@@ -129,7 +130,7 @@
     <h2>Unmatched activities ({{ ungrouped|length }})</h2>
     <div class="grid">
         {% for a in ungrouped %}
-        <a class="card" href="/activity/{{ a.id }}">
+        <a class="card" href="{{ base_path }}/activity/{{ a.id }}">
             <h3>{{ a.name }}</h3>
             <p>{{ "%.1f"|format(a.distance_m / 1000) }} km &middot; {{ a.duration_s | hms }} &middot; {{ a | pace }}
                {% if a.start_time %} &middot; {{ a.start_time.strftime("%Y-%m-%d") }}{% endif %}</p>
