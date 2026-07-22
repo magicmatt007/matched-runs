@@ -7,7 +7,7 @@ block title %}{{ group.name }}{% endblock %} {% block content %}
 
 <div id="map" style="height: 480px"></div>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, "{{ base_path }}/group/" ~ group.id, {}, base_path=base_path) }}
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, "{{ base_path }}/group/" ~ group.id, {}) }}
 
 <table class="table">
   <thead>
@@ -36,7 +36,7 @@ block title %}{{ group.name }}{% endblock %} {% block content %}
   </tbody>
 </table>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, "{{ base_path }}/group/" ~ group.id, {}, base_path=base_path) }}
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, "{{ base_path }}/group/" ~ group.id, {}) }}
 
 <script>
   const map = L.map('map');
