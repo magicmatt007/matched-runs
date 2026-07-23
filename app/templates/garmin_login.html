@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% set base_path = request.headers.get('X-Ingress-Path', '') %}
+{% block title %}Connect Garmin{% endblock %}
+{% block content %}
+
+<a href="{{ base_path }}/">&larr; back</a>
+<h2>Connect Garmin</h2>
+
+{% if error %}
+<p style="color:#e6194b;">{{ error }}</p>
+{% endif %}
+
+{% if step == "credentials" %}
+<form action="{{ base_path }}/garmin/login/start" method="post" class="panel">
+    <div class="row">
+        <label for="email">Garmin email</label>
+        <input type="email" name="email" id="email" value="{{ default_email or '' }}" required>
+    </div>
+    <div class="row" style="margin-top: 8px;">
+        <label for="password">Garmin password</label>
+        <input type="password" name="password" id="password" required>
+    </div>
+    <button type="submit" style="margin-top: 12px;">Log in</button>
+</form>
+<p class="muted">Your password is only used to complete this login and isn't
+    stored anywhere - only the resulting session token is kept, valid for
+    roughly a year before you'd need to log in again.</p>
+
+{% elif step == "mfa" %}
+<form action="{{ base_path }}/garmin/login/mfa" method="post" class="panel">
+    <input type="hidden" name="mfa_token" value="{{ mfa_token }}">
+    <label for="mfa_code">Enter the MFA code Garmin just sent you</label>
+    <input type="text" name="mfa_code" id="mfa_code" autocomplete="one-time-code" required>
+    <button type="submit" style="margin-top: 12px;">Verify</button>
+</form>
+{% endif %}
+
+{% endblock %}

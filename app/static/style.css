@@ -70,7 +70,7 @@ button, .button {
     font-size: 0.95rem;
     display: inline-block;
 }
-button.secondary { background: #2a2e38; }
+button.secondary, .button.secondary { background: #2a2e38; }
 .muted { color: var(--muted); font-size: 0.9rem; }
 .table { width: 100%; border-collapse: collapse; margin-top: 16px; }
 .table th, .table td {
@@ -80,3 +80,14 @@ button.secondary { background: #2a2e38; }
 }
 a { color: #6aa9ff; }
 #map { border-radius: 8px; margin: 16px 0; border: 1px solid var(--border); }
+.panel label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 0.9rem; }
+.panel input[type="email"], .panel input[type="password"], .panel input[type="text"], .panel input[type="date"] {
+    background: #1d212b;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    width: 100%;
+    max-width: 320px;
+}

@@ -4,25 +4,6 @@ A self-hosted "matched runs" tool: it groups your runs by route, the same
 idea as Strava's paid "matched runs" feature, but free and running on your
 own machine.
 
-## Running as a Home Assistant app
-
-This same codebase can be installed as a Home Assistant app instead of (or
-alongside) plain `docker compose`:
-
-1. In Home Assistant: Settings → Add-ons → Add-on Store → ⋮ (top right) →
-   Repositories → add this repo's URL.
-2. Find "Matched Runs" in the store and install it.
-3. Configure any options you need (Garmin/Strava credentials, etc.) in the
-   app's Configuration tab - these map to the same environment variables
-   `.env` uses for the standalone deployment.
-4. Start it. Access it via the sidebar (ingress) for daily use, or the
-   direct port if you need Strava OAuth to work (see DOCS.md).
-
-The standalone `docker compose up` deployment described below is completely
-unaffected by this - both use the exact same Dockerfile and code, just two
-different ways of launching the same container.
-
-
 ## How matching works
 
 Each run's GPS track is resampled to 40 evenly-spaced points along its
@@ -31,6 +12,26 @@ both directions, so an out-and-back loop run either way still matches).
 Runs whose total distance is within 15% of each other and whose average
 point deviation is under 50m are grouped together. Both thresholds are
 configurable in `.env`.
+
+## Running as a Home Assistant app
+
+This same codebase can be installed as a Home Assistant app (formerly
+called an "add-on") instead of, or alongside, plain `docker compose` - both
+use the exact same Dockerfile and code, just two different ways of
+launching the same container.
+
+1. In Home Assistant: Settings → Add-ons → Add-on Store → ⋮ (top right) →
+   Repositories → add this repo's URL.
+2. Find "Matched Runs" in the store and install it.
+3. Configure any options you need (Garmin sync fallback credentials,
+   Strava, matching sensitivity) in the app's Configuration tab - these map
+   to the same environment variables `.env` uses for the standalone
+   deployment. Garmin doesn't need any configuration here at all - use the
+   "Connect Garmin" button in the app's own UI instead, see DOCS.md.
+4. Start it. Access it via the sidebar (ingress) for daily use, or the
+   direct port if you need Strava OAuth to work (ingress URLs are dynamic
+   per-session tokens, which don't work as a stable OAuth callback - see
+   DOCS.md for details).
 
 ## Getting your data in
 
@@ -83,22 +84,20 @@ is unofficial and can break if Garmin changes their login flow (it has
 happened before). Treat it as convenient-but-not-guaranteed, and keep the
 manual GPX/FIT export path in mind as a fallback.
 
-Setup:
-1. Set `GARMIN_EMAIL` and `GARMIN_PASSWORD` in `.env`.
-2. **If your Garmin account has MFA/2FA enabled** (recommended for security,
-   but it means a background job can't complete the login on its own), run
-   this once, interactively, before starting the app normally:
-   ```bash
-   docker compose run --rm -it matched-runs python garmin_login.py
-   ```
-   Follow the prompts (including entering your MFA code when asked). This
-   saves a session that's reused automatically afterwards — you shouldn't
-   need to do this again for about a year.
-3. If your account does *not* have MFA enabled, you can skip step 2 —
-   `GARMIN_EMAIL`/`GARMIN_PASSWORD` alone are enough.
-4. Start the app normally. It checks Garmin for new activities every
-   `GARMIN_SYNC_INTERVAL_MINUTES` (default 120), and there's also a "Sync
-   from Garmin now" button on the homepage for an on-demand check.
+Setup: start the app, then click **"Connect Garmin"** on the homepage and
+log in with your Garmin credentials right there in the browser - including
+entering an MFA code if your account has that enabled. That's it; no
+terminal or docker commands needed. This creates a session that's reused
+automatically afterwards (valid for roughly a year), and the app checks for
+new activities every `GARMIN_SYNC_INTERVAL_MINUTES` (default 120), with a
+"Sync from Garmin now" button for an on-demand check too.
+
+Your password is only used for that one login and isn't stored anywhere -
+only the resulting session token is kept, under this app's `/data` volume.
+
+(There's also a `garmin_login.py` script and `GARMIN_EMAIL`/`GARMIN_PASSWORD`
+env vars still available as a lower-level alternative if you'd rather not
+use the web form, but the "Connect Garmin" button is the recommended path.)
 
 If sync stops working after previously working fine, it's most likely Garmin
 having changed something on their end — check

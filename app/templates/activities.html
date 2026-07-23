@@ -55,7 +55,7 @@
     </tbody>
 </table>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, "{{ base_path }}/activities",
-                        {"type": selected_type} if selected_type else {} )}}
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/activities",
+                        {"type": selected_type} if selected_type else {}) }}
 
 {% endblock %}
