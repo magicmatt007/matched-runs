@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
-{% block title %}Matched Runs{% endblock %}
+{% block title %}Import & Sync{% endblock %}
 {% block content %}
+
+<a href="{{ base_path }}/">&larr; back to activities</a>
+<h2>Import &amp; Sync</h2>
 
 {% if upload_result %}
 <section class="panel" style="border-color: {% if upload_result.imported|int > 0 or upload_result.updated|int > 0 %}#3cb44b{% else %}#e6194b{% endif %};">

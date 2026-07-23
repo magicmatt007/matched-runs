@@ -91,3 +91,46 @@ a { color: #6aa9ff; }
     width: 100%;
     max-width: 320px;
 }
+
+/* Native file inputs can overflow their container on narrow screens */
+input[type="file"] {
+    max-width: 100%;
+}
+
+/* Tables scroll horizontally instead of squeezing/overflowing the page */
+.table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-top: 16px;
+}
+.table-responsive .table {
+    margin-top: 0;
+}
+
+/* Mobile: tighter spacing, smaller map, denser table, single-column cards */
+@media (max-width: 640px) {
+    main {
+        padding: 12px;
+    }
+    header {
+        padding: 12px 16px;
+    }
+    .panel {
+        padding: 14px;
+        border-radius: 8px;
+    }
+    #map {
+        height: 300px !important;
+    }
+    .table th, .table td {
+        padding: 6px 8px;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+    .grid {
+        grid-template-columns: 1fr;
+    }
+    h2 {
+        font-size: 1.25rem;
+    }
+}

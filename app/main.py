@@ -26,7 +26,11 @@ from app import strava_client
 from app import garmin_client
 
 logger = logging.getLogger("matched_runs")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 GARMIN_SYNC_INTERVAL_MINUTES = int(os.environ.get("GARMIN_SYNC_INTERVAL_MINUTES", 120))
 
@@ -144,8 +148,8 @@ templates.env.filters["hms"] = format_duration_hms
 templates.env.filters["pace"] = format_pace
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request, db: Session = Depends(get_db)):
+@app.get("/manage", response_class=HTMLResponse)
+def manage_page(request: Request, db: Session = Depends(get_db)):
     groups = (
         db.query(RouteGroup)
         .order_by(RouteGroup.avg_distance_m.desc())
@@ -173,7 +177,7 @@ def index(request: Request, db: Session = Depends(get_db)):
             "unsupported": request.query_params.get("unsupported", "0"),
         }
 
-    return templates.TemplateResponse("index.html", {
+    return templates.TemplateResponse("manage.html", {
         "request": request,
         "groups": groups,
         "group_counts": group_counts,
@@ -310,7 +314,7 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
     )
     return local_redirect(
         request,
-        f"/?imported={added}&updated={updated}&skipped={skipped}"
+        f"/manage?imported={added}&updated={updated}&skipped={skipped}"
         f"&duplicates={unchanged}&unsupported={unsupported_ext}",
     )
 
@@ -330,7 +334,16 @@ def paginate(query, page: int, page_size: int):
     return items, page, total_pages, total, page_size
 
 
-@app.get("/activities", response_class=HTMLResponse)
+@app.get("/activities")
+def activities_old_url_redirect(request: Request, type: str = None, page: int = 1,
+                                 page_size: int = DEFAULT_PAGE_SIZE):
+    """The 'All Activities' page used to live at /activities - it's now the
+    home page at /. Keep old bookmarks/links working."""
+    params = f"?page={page}&page_size={page_size}" + (f"&type={type}" if type else "")
+    return local_redirect(request, f"/{params}")
+
+
+@app.get("/", response_class=HTMLResponse)
 def activities_list(request: Request, type: str = None, page: int = 1,
                      page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
     query = db.query(Activity).order_by(Activity.start_time.desc())
@@ -397,7 +410,7 @@ def normalize_types_route(request: Request, db: Session = Depends(get_db)):
         db.commit()
         rebuild_groups(db)  # renamed types can change which activities group together
     logger.info("Type normalization (version suffixes): %d activities updated", changed)
-    return local_redirect(request, f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
+    return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
 
 
 DEFAULT_LEGACY_TYPE_CUTOFF = "2026-04-01"
@@ -431,20 +444,20 @@ def merge_legacy_types_route(request: Request, cutoff_date: str = Form(DEFAULT_L
         db.commit()
         rebuild_groups(db)  # merged types can change which activities group together
     logger.info("Legacy type merge (activities before %s): %d activities updated", cutoff_date, changed)
-    return local_redirect(request, f"/?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
+    return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
 
 
 @app.post("/dedupe")
 def dedupe_route(request: Request, db: Session = Depends(get_db)):
     removed = merge_duplicate_activities(db)
     logger.info("Deduplication: merged/removed %d duplicate activities", removed)
-    return local_redirect(request, f"/?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0")
+    return local_redirect(request, f"/manage?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0")
 
 
 @app.post("/rebuild")
 def rebuild(request: Request, db: Session = Depends(get_db)):
     rebuild_groups(db)
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 # ---------------- Strava OAuth + sync ----------------
@@ -463,7 +476,7 @@ def strava_login():
 def strava_callback(request: Request, code: str = None, error: str = None, scope: str = None,
                      db: Session = Depends(get_db)):
     if error or not code:
-        return local_redirect(request, "/")
+        return local_redirect(request, "/manage")
 
     data = strava_client.exchange_code_for_token(code)
 
@@ -496,21 +509,21 @@ def strava_callback(request: Request, code: str = None, error: str = None, scope
         token.expires_at = data["expires_at"]
         token.scope = scope
     db.commit()
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 @app.post("/strava/disconnect")
 def strava_disconnect(request: Request, db: Session = Depends(get_db)):
     db.query(StravaToken).delete()
     db.commit()
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 @app.post("/strava/sync")
 def strava_sync(request: Request, db: Session = Depends(get_db)):
     token = db.query(StravaToken).first()
     if not token:
-        return local_redirect(request, "/")
+        return local_redirect(request, "/manage")
 
     try:
         access_token = strava_client.ensure_valid_token(token)
@@ -561,7 +574,7 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
     db.commit()
     if added or updated:
         rebuild_groups(db)
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 # ---------------- Garmin Connect auto-sync (unofficial) ----------------
@@ -646,7 +659,7 @@ def garmin_sync_route(request: Request, db: Session = Depends(get_db)):
     except garmin_client.GarminAuthError as e:
         prefix = ingress_prefix(request)
         return HTMLResponse(f"<p>{e}</p><p><a href='{prefix}/'>back</a></p>", status_code=401)
-    return local_redirect(request, f"/?imported={added}&updated={updated}&skipped=0&duplicates=0&unsupported=0")
+    return local_redirect(request, f"/manage?imported={added}&updated={updated}&skipped=0&duplicates=0&unsupported=0")
 
 
 @app.get("/garmin/login", response_class=HTMLResponse)
@@ -669,7 +682,7 @@ def garmin_login_start(request: Request, email: str = Form(...), password: str =
         return templates.TemplateResponse("garmin_login.html", {
             "request": request, "step": "mfa", "mfa_token": token,
         })
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 @app.post("/garmin/login/mfa")
@@ -680,23 +693,27 @@ def garmin_login_mfa(request: Request, mfa_token: str = Form(...), mfa_code: str
         return templates.TemplateResponse("garmin_login.html", {
             "request": request, "step": "mfa", "mfa_token": mfa_token, "error": str(e),
         })
-    return local_redirect(request, "/")
+    return local_redirect(request, "/manage")
 
 
 async def _garmin_background_sync_loop():
     while True:
         await asyncio.sleep(GARMIN_SYNC_INTERVAL_MINUTES * 60)
         if not (garmin_client.is_configured() or garmin_client.has_saved_session()):
+            logger.info("Background Garmin sync: skipped scheduled check (not configured, no saved session)")
             continue
+        logger.info("Background Garmin sync: starting scheduled check")
         db = SessionLocal()
         try:
             added, updated = do_garmin_sync(db)
-            if added or updated:
-                logger.info("Background Garmin sync: %d added, %d updated", added, updated)
+            logger.info(
+                "Background Garmin sync: scheduled check complete - %d added, %d updated",
+                added, updated,
+            )
         except garmin_client.GarminAuthError as e:
-            logger.warning("Background Garmin sync auth failed: %s", e)
+            logger.warning("Background Garmin sync: scheduled check failed (auth error): %s", e)
         except Exception as e:
-            logger.warning("Background Garmin sync failed: %s", e)
+            logger.warning("Background Garmin sync: scheduled check failed: %s", e)
         finally:
             db.close()
 

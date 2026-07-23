@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
 {% from "_pagination.html" import pagination_controls %}
-{% block title %}All Activities{% endblock %}
+{% block title %}Matched Runs{% endblock %}
 {% block content %}
 
-<a href="{{ base_path }}/">&larr; back</a>
-<h2>All activities</h2>
+<div class="row" style="justify-content: space-between;">
+    <h2>All activities</h2>
+    <a class="button" href="{{ base_path }}/manage">Import &amp; Sync</a>
+</div>
 
-<form method="get" action="{{ base_path }}/activities" class="row" style="margin: 12px 0;">
+<form method="get" action="{{ base_path }}/" class="row" style="margin: 12px 0;">
     <label for="type" class="muted">Filter by type:</label>
     <select name="type" id="type" onchange="this.form.submit()">
         <option value="" {% if not selected_type %}selected{% endif %}>All types</option>
@@ -19,9 +21,10 @@
     <noscript><button type="submit">Apply</button></noscript>
 </form>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/activities",
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/",
                         {"type": selected_type} if selected_type else {}) }}
 
+<div class="table-responsive">
 <table class="table">
     <thead>
         <tr>
@@ -54,8 +57,9 @@
     {% endfor %}
     </tbody>
 </table>
+</div>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/activities",
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/",
                         {"type": selected_type} if selected_type else {}) }}
 
 {% endblock %}

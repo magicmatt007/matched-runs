@@ -12,6 +12,7 @@
 
 {{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, {}) }}
 
+<div class="table-responsive">
 <table class="table">
     <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Source</th></tr></thead>
     <tbody>
@@ -28,6 +29,7 @@
     {% endfor %}
     </tbody>
 </table>
+</div>
 
 {{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, {}) }}
 
