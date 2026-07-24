@@ -134,3 +134,37 @@ input[type="file"] {
         font-size: 1.25rem;
     }
 }
+
+/* Same rules as the @media block above, but gated by a JS-set class instead
+   of a CSS breakpoint. Home Assistant's ingress renders this page inside an
+   iframe, and some browser/webview combinations don't evaluate @media
+   queries against the phone's actual screen width in that context - only
+   against however wide the iframe itself measures, which can differ. This
+   class is set from actual measured window width in JS (see base.html), so
+   it works correctly regardless of how the surrounding iframe reports its
+   own size. Harmless/inert when accessed directly (docker compose) too,
+   since the @media query already covers that case there. */
+html.is-mobile main {
+    padding: 12px;
+}
+html.is-mobile header {
+    padding: 12px 16px;
+}
+html.is-mobile .panel {
+    padding: 14px;
+    border-radius: 8px;
+}
+html.is-mobile #map {
+    height: 300px !important;
+}
+html.is-mobile .table th, html.is-mobile .table td {
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+html.is-mobile .grid {
+    grid-template-columns: 1fr;
+}
+html.is-mobile h2 {
+    font-size: 1.25rem;
+}

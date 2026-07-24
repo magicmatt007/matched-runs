@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1
+- Fixed responsive/mobile layout not activating when accessed through Home
+  Assistant's ingress iframe (worked fine via direct docker compose access).
+  Mobile styling now also driven by an actual measured-width JS check, not
+  just a CSS @media breakpoint, since some iframe contexts don't evaluate
+  @media queries against the true device width.
+
 ## 1.1.0
 - Home page is now the "All Activities" list (was previously a separate
   page at /activities)

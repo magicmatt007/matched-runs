@@ -4,6 +4,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+    // Home Assistant's ingress renders this page inside an iframe, and some
+    // browser/webview combinations don't evaluate CSS @media queries against
+    // the phone's actual screen width in that context - only against
+    // whatever width the iframe itself reports, which can differ from the
+    // real device width. This measures the actual rendered width directly
+    // and sets a class CSS can key off instead, which is immune to that
+    // iframe-viewport quirk. Harmless when accessed directly too (docker
+    // compose), since the plain @media breakpoint already covers that case.
+    (function () {
+        function updateMobileClass() {
+            var w = document.documentElement.clientWidth || window.innerWidth || 0;
+            document.documentElement.classList.toggle('is-mobile', w > 0 && w <= 640);
+        }
+        updateMobileClass();
+        window.addEventListener('resize', updateMobileClass);
+        window.addEventListener('orientationchange', updateMobileClass);
+    })();
+    </script>
     <title>{% block title %}Matched Runs{% endblock %}</title>
     <link rel="stylesheet" href="{{ base_path }}/static/vendor/leaflet/leaflet.css" />
     <link rel="stylesheet" href="{{ base_path }}/static/style.css">
