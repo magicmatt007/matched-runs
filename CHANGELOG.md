@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+- Route matching is now incremental for routine imports (Garmin auto-sync,
+  manual Garmin/Strava sync, and small file uploads): instead of
+  recomputing every pairwise comparison across your entire history on every
+  sync, only the newly-added activities are compared against what's
+  relevant. This was previously the main performance cost of background
+  Garmin sync on slower hardware (e.g. Raspberry Pi). Manual actions
+  (Recompute, dedupe, type normalization) and large bulk imports (20+ new
+  activities at once) still use the full, guaranteed-correct rebuild.
+  Verified the incremental result is mathematically identical to a full
+  rebuild via automated tests before shipping this.
+
 ## 1.1.1
 - Fixed responsive/mobile layout not activating when accessed through Home
   Assistant's ingress iframe (worked fine via direct docker compose access).

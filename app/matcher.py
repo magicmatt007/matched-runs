@@ -178,6 +178,124 @@ def merge_duplicate_activities(db):
     return len(to_delete)
 
 
+def _seeded_clusters(candidate_ids, existing_group_of, new_ids, get_type, get_track, match_fn):
+    """
+    Core clustering logic, kept dependency-free (no DB) so it's directly
+    testable. Given a pool of candidate activity ids:
+    - seeds a union-find from their EXISTING group memberships (cheap - no
+      geometry comparison, since those groupings are already known-correct)
+    - then only computes NEW pairwise geometry comparisons for pairs
+      involving at least one id in `new_ids` (covers new-vs-existing and
+      new-vs-new; skips existing-vs-existing entirely, and skips any pair
+      already unioned via the seed step)
+    Returns {id: cluster_root_id}.
+
+    get_type(id) -> activity type string
+    get_track(id) -> (resampled_points, length_m)
+    match_fn(a_pts, a_len, b_pts, b_len) -> bool
+    """
+    uf = UnionFind(candidate_ids)
+
+    by_group = {}
+    for cid in candidate_ids:
+        g = existing_group_of.get(cid)
+        if g:
+            by_group.setdefault(g, []).append(cid)
+    for members in by_group.values():
+        for other in members[1:]:
+            uf.union(members[0], other)
+
+    for nid in new_ids:
+        n_pts, n_len = get_track(nid)
+        n_type = get_type(nid)
+        for cid in candidate_ids:
+            if cid == nid or uf.find(nid) == uf.find(cid):
+                continue
+            if get_type(cid) != n_type:
+                continue
+            c_pts, c_len = get_track(cid)
+            if match_fn(n_pts, n_len, c_pts, c_len):
+                uf.union(nid, cid)
+
+    return {cid: uf.find(cid) for cid in candidate_ids}
+
+
+def incremental_rebuild_groups(db, new_activity_ids):
+    """
+    Cheaper alternative to rebuild_groups() when only a small number of new
+    activities were just imported into a large existing history (e.g. a
+    routine Garmin sync bringing in 1-2 new runs). Produces the same
+    clustering result rebuild_groups() would, but only computes NEW
+    pairwise geometry comparisons instead of recomputing every pair in the
+    whole database - existing, already-correct group memberships are reused
+    via seeding rather than re-derived. Falls back to a full rebuild_groups()
+    if there's no existing grouping yet to build on (e.g. first import ever).
+    """
+    if not new_activity_ids:
+        return
+
+    new_activities = [a for a in db.query(Activity).filter(Activity.id.in_(new_activity_ids)).all()]
+    if not new_activities:
+        return
+
+    if db.query(RouteGroup.id).first() is None:
+        # Nothing to incrementally build on yet - a full rebuild is simplest
+        # and no more expensive than this would be in that case anyway.
+        rebuild_groups(db)
+        return
+
+    relevant_types = {(a.activity_type or "Other") for a in new_activities}
+
+    # Candidate pool: every activity (new or existing) sharing a type with
+    # at least one new activity - matching can only happen within the same
+    # type, so anything outside these types is correctly never touched.
+    candidates = db.query(Activity).filter(Activity.activity_type.in_(relevant_types)).all()
+    by_id = {a.id: a for a in candidates}
+    tracks = {}
+    for act in candidates:
+        pts = act.resampled_points
+        tracks[act.id] = (pts, act.distance_m or track_length(pts))
+
+    new_ids = {a.id for a in new_activities if a.id in by_id}
+    existing_group_of = {a.id: a.group_id for a in candidates if a.group_id}
+
+    clusters_by_root = {}
+    result = _seeded_clusters(
+        candidate_ids=list(by_id.keys()),
+        existing_group_of=existing_group_of,
+        new_ids=new_ids,
+        get_type=lambda i: by_id[i].activity_type or "Other",
+        get_track=lambda i: tracks[i],
+        match_fn=tracks_match,
+    )
+    for cid, root in result.items():
+        clusters_by_root.setdefault(root, []).append(cid)
+
+    # Only touch RouteGroup rows that fall within this candidate pool -
+    # anything outside these types is untouched and doesn't need locking.
+    affected_group_ids = set(existing_group_of.values())
+    for act in candidates:
+        act.group_id = None
+    if affected_group_ids:
+        db.query(RouteGroup).filter(RouteGroup.id.in_(affected_group_ids)).delete(synchronize_session=False)
+    db.flush()
+
+    for member_ids in clusters_by_root.values():
+        if len(member_ids) < 2:
+            continue  # ungrouped / unique route
+        avg_dist = sum(tracks[i][1] for i in member_ids) / len(member_ids)
+        group = RouteGroup(
+            name=f"{avg_dist / 1000:.1f} km route",
+            avg_distance_m=avg_dist,
+        )
+        db.add(group)
+        db.flush()
+        for i in member_ids:
+            by_id[i].group_id = group.id
+
+    db.commit()
+
+
 def rebuild_groups(db):
     """Recompute route groups from scratch based on all stored activities."""
     activities = db.query(Activity).all()

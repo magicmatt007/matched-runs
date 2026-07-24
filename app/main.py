@@ -18,7 +18,7 @@ from app.models import Activity, RouteGroup, StravaToken, GarminSyncState
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
-from app.matcher import resample_track, rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
+from app.matcher import resample_track, rebuild_groups, incremental_rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
 from app.polyline_util import decode_polyline
 from app.type_normalize import normalize_activity_type, merge_legacy_type
 from app.strava_csv import parse_strava_activities_csv
@@ -207,6 +207,7 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
 
     added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
     seen_extensions = set()
+    added_activities = []
 
     # Strava's bulk export includes a top-level activities.csv mapping each
     # exported file to the title you actually gave it on Strava. If it's
@@ -288,6 +289,7 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         )
         if status == "added":
             added += 1
+            added_activities.append(activity)
         elif status == "updated":
             updated += 1
         else:
@@ -304,9 +306,26 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
                 act.name = better_name
                 updated += 1
 
+    db.flush()  # assign primary keys to newly added activities before reading their ids
+    added_ids = [a.id for a in added_activities]
     db.commit()
-    if added or updated:
+
+    if updated:
+        # A metadata-only update (name/type backfill) doesn't need
+        # re-matching, but a cross-source-duplicate merge DOES change an
+        # activity's geometry - since upload_gpx can't tell those apart
+        # here without extra bookkeeping, play it safe with a full rebuild
+        # whenever any update happened at all.
         rebuild_groups(db)
+    elif added_ids:
+        if len(added_ids) > 20:
+            # A big bulk import (e.g. years of history in one folder
+            # upload) has enough new activities that comparing each one
+            # against everything isn't meaningfully cheaper than a full
+            # rebuild - just do the simple, obviously-correct thing.
+            rebuild_groups(db)
+        else:
+            incremental_rebuild_groups(db, added_ids)
 
     logger.info(
         "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
@@ -548,6 +567,7 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
         )
 
     added, updated = 0, 0
+    added_activities = []
     for a in activities:
         polyline = (a.get("map") or {}).get("summary_polyline")
         if not polyline:
@@ -569,11 +589,21 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
         )
         if status == "added":
             added += 1
+            added_activities.append(activity)
         elif status == "updated":
             updated += 1
+
+    db.flush()
+    added_ids = [a.id for a in added_activities]
     db.commit()
-    if added or updated:
+
+    if updated:
         rebuild_groups(db)
+    elif added_ids:
+        if len(added_ids) > 20:
+            rebuild_groups(db)
+        else:
+            incremental_rebuild_groups(db, added_ids)
     return local_redirect(request, "/manage")
 
 
@@ -590,6 +620,7 @@ def do_garmin_sync(db: Session):
     new_activities = garmin_client.fetch_new_activities(client, after=last_checked)
 
     added, updated = 0, 0
+    added_activities = []
     newest_seen = last_checked
     for a in new_activities:
         activity_id = a.get("activityId")
@@ -629,7 +660,7 @@ def do_garmin_sync(db: Session):
         distance_m = a.get("distance") or parsed["distance_m"]
         duration_s = a.get("duration") or parsed["duration_s"]
 
-        status, _ = _save_activity(
+        status, activity = _save_activity(
             db, source="garmin", external_id=str(activity_id),
             name=name, points=parsed["points"], distance_m=distance_m,
             duration_s=duration_s, start_time=parsed["start_time"],
@@ -637,6 +668,7 @@ def do_garmin_sync(db: Session):
         )
         if status == "added":
             added += 1
+            added_activities.append(activity)
         elif status == "updated":
             updated += 1
 
@@ -646,9 +678,25 @@ def do_garmin_sync(db: Session):
     else:
         sync_state.last_checked_at = newest_seen
 
+    db.flush()  # assign primary keys to newly added activities before reading their ids
+    added_ids = [a.id for a in added_activities]
     db.commit()
-    if added or updated:
+
+    if updated:
         rebuild_groups(db)
+    elif added_ids:
+        if len(added_ids) > 20:
+            # A big catch-up sync (e.g. the very first run after connecting,
+            # pulling in a lot of history at once) - not meaningfully
+            # cheaper to do incrementally than just rebuilding fully.
+            rebuild_groups(db)
+        else:
+            # The routine case: a scheduled sync bringing in a handful of
+            # new activities. This is the specific path that used to pay a
+            # full O(n^2) recompute cost on every single background check -
+            # now it only compares the new activities against what's
+            # relevant instead of re-deriving the whole history.
+            incremental_rebuild_groups(db, added_ids)
     return added, updated
 
 
