@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% set base_path = request.headers.get('X-Ingress-Path', '') %}
+{% block title %}Training Log{% endblock %}
+{% block content %}
+
+<h2>Training Log</h2>
+
+{% if not types %}
+<p class="muted">No activities imported yet.</p>
+{% else %}
+
+<form method="get" action="{{ base_path }}/log" class="row" style="margin: 12px 0;">
+    <label for="type" class="muted">Activity type</label>
+    <select name="type" id="type" onchange="this.form.submit()">
+        {% for t in types %}
+        <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <input type="hidden" name="period" value="{{ period }}">
+</form>
+
+<div class="row" style="margin: 12px 0;">
+    <a class="button {% if period != '7d' %}secondary{% endif %}" href="{{ base_path }}/log?type={{ selected_type }}&period=7d">Last 7 days</a>
+    <a class="button {% if period != '4w' %}secondary{% endif %}" href="{{ base_path }}/log?type={{ selected_type }}&period=4w">Last 4 weeks</a>
+    <a class="button {% if period != '1y' %}secondary{% endif %}" href="{{ base_path }}/log?type={{ selected_type }}&period=1y">Last year</a>
+</div>
+
+<div class="row" style="justify-content: space-between; margin: 16px 0;">
+    {% if current_month %}
+        <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ prev_month }}">&laquo; Previous month</a>
+        <strong>{{ window_start.strftime("%B %Y") }}</strong>
+        {% if next_month %}
+            <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ next_month }}">Next month &raquo;</a>
+        {% else %}
+            <span class="muted">Next month &raquo;</span>
+        {% endif %}
+    {% else %}
+        <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset + 1 }}">&laquo; Previous period</a>
+        <strong>{{ window_start.strftime("%Y-%m-%d") }} &ndash; {{ window_end.strftime("%Y-%m-%d") }}</strong>
+        {% if can_go_next_period %}
+            <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset - 1 }}">Next period &raquo;</a>
+        {% else %}
+            <span class="muted">Next period &raquo;</span>
+        {% endif %}
+    {% endif %}
+</div>
+
+{% if current_month %}
+<p><a href="{{ base_path }}/log?type={{ selected_type }}&period=1y">&larr; Back to monthly overview</a></p>
+{% endif %}
+
+<div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+    <div class="panel" style="flex: 1; min-width: 140px; text-align: center;">
+        <div class="muted">Total distance</div>
+        <div style="font-size: 1.5rem; font-weight: 700;">{{ "%.1f"|format(total_distance_km) }} km</div>
+    </div>
+    <div class="panel" style="flex: 1; min-width: 140px; text-align: center;">
+        <div class="muted">Avg weekly</div>
+        <div style="font-size: 1.5rem; font-weight: 700;">{{ "%.1f"|format(avg_weekly_km) }} km</div>
+    </div>
+    <div class="panel" style="flex: 1; min-width: 140px; text-align: center;">
+        <div class="muted">Avg monthly</div>
+        <div style="font-size: 1.5rem; font-weight: 700;">{{ "%.1f"|format(avg_monthly_km) }} km</div>
+    </div>
+</div>
+
+{% if mode == "monthly" %}
+    {% if not month_groups %}
+        <p class="muted">No activities in this period.</p>
+    {% endif %}
+    <div class="grid">
+        {% for g in month_groups %}
+        <a class="card" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ g.month }}">
+            <h3>{{ g.label }}</h3>
+            <p>{{ "%.1f"|format(g.distance_m / 1000) }} km &middot; {{ g.count }} activities</p>
+        </a>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr><th>Date</th><th>Name</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Matched route</th></tr>
+        </thead>
+        <tbody>
+        {% for a in activities %}
+            <tr>
+                <td>{{ a.start_time.strftime("%Y-%m-%d") if a.start_time else "-" }}</td>
+                <td><a href="{{ base_path }}/activity/{{ a.id }}">{{ a.name }}</a></td>
+                <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
+                <td>{{ a.duration_s | hms }}</td>
+                <td>{{ a | pace }}</td>
+                <td>
+                    {% if a.group_id %}
+                        <a href="{{ base_path }}/group/{{ a.group_id }}">{{ a.group.activities|length }} runs</a>
+                    {% else %}
+                        <span class="muted">no match</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6" class="muted">No activities in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+{% endif %}
+
+{% endif %}
+
+{% endblock %}

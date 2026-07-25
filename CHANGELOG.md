@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.0
+- New "Training Log" page (linked from the header): pick an activity type,
+  choose a period (last 7 days, last 4 weeks, or last year), and navigate
+  forward/backward through periods. The 1-year view groups activities by
+  month with distance totals instead of listing them directly - click a
+  month to drill into its individual activities, with previous/next month
+  navigation (correctly disabled for months that haven't started yet).
+  Always shows total distance, average weekly, and average monthly distance
+  for whatever's currently displayed. Verified all the date-window
+  arithmetic (7d/4w/1y window boundaries, month rollover including
+  December->January, leap year February, future-month guarding) via
+  dedicated tests before shipping, since that's exactly the kind of logic
+  that's easy to get subtly wrong.
+
 ## 1.3.1
 - Fixed sort direction being stuck on descending - clicking an
   already-sorted column now correctly toggles between ascending and

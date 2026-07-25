@@ -565,6 +565,118 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
     return templates.TemplateResponse("activity.html", {"request": request, "activity": activity})
 
 
+# ---------------- Training log (period-based view, grouped by month for 1y) ----------------
+
+PERIOD_DAYS = {"7d": 7, "4w": 28, "1y": 365}
+
+
+def _period_window(period: str, offset: int):
+    """Returns (window_start, window_end, span_days) for a rolling period
+    ending `offset` periods ago (offset=0 -> ending today)."""
+    days = PERIOD_DAYS.get(period, 7)
+    today = datetime.utcnow().date()
+    end_date = today - timedelta(days=offset * days)
+    start_date = end_date - timedelta(days=days - 1)
+    window_start = datetime.combine(start_date, datetime.min.time())
+    window_end = datetime.combine(end_date, datetime.max.time())
+    return window_start, window_end, days
+
+
+@app.get("/log", response_class=HTMLResponse)
+def training_log(request: Request, type: str = None, period: str = "7d",
+                  offset: int = 0, month: str = None, db: Session = Depends(get_db)):
+    if period not in PERIOD_DAYS:
+        period = "7d"
+    if offset < 0:
+        offset = 0
+
+    types = sorted({
+        row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
+    })
+    if not type and types:
+        type = types[0]
+
+    base_query = db.query(Activity)
+    if type:
+        base_query = base_query.filter(Activity.activity_type == type)
+
+    today = datetime.utcnow().date()
+
+    # Drilling into a specific month only applies within the 1y view.
+    drill_month = None
+    if period == "1y" and month:
+        try:
+            drill_month = datetime.strptime(month, "%Y-%m")
+        except ValueError:
+            drill_month = None
+
+    current_month = prev_month = next_month = None
+
+    if drill_month:
+        month_start = drill_month.replace(day=1)
+        month_next = (
+            month_start.replace(year=month_start.year + 1, month=1)
+            if month_start.month == 12
+            else month_start.replace(month=month_start.month + 1)
+        )
+        window_start = month_start
+        window_end = month_next - timedelta(seconds=1)
+        span_days = (month_next - month_start).days
+        current_month = month_start.strftime("%Y-%m")
+        prev_month = (month_start - timedelta(days=1)).strftime("%Y-%m")
+        if month_next.date() <= today:
+            next_month = month_next.strftime("%Y-%m")
+        mode = "list"
+    else:
+        window_start, window_end, span_days = _period_window(period, offset)
+        mode = "monthly" if period == "1y" else "list"
+
+    activities = (
+        base_query.filter(Activity.start_time >= window_start, Activity.start_time <= window_end)
+        .order_by(Activity.start_time.desc())
+        .all()
+    )
+
+    month_groups = []
+    if mode == "monthly":
+        groups = {}
+        for a in activities:
+            key = a.start_time.strftime("%Y-%m")
+            g = groups.setdefault(key, {
+                "month": key,
+                "label": a.start_time.strftime("%B %Y"),
+                "count": 0,
+                "distance_m": 0.0,
+            })
+            g["count"] += 1
+            g["distance_m"] += a.distance_m or 0
+        month_groups = sorted(groups.values(), key=lambda g: g["month"], reverse=True)
+
+    total_distance_km = sum(a.distance_m or 0 for a in activities) / 1000.0
+    avg_weekly_km = (total_distance_km / span_days * 7) if span_days else 0.0
+    avg_monthly_km = (total_distance_km / span_days * 30.44) if span_days else 0.0
+
+    return templates.TemplateResponse("log.html", {
+        "request": request,
+        "types": types,
+        "selected_type": type,
+        "period": period,
+        "offset": offset,
+        "mode": mode,
+        "activities": activities,
+        "month_groups": month_groups,
+        "current_month": current_month,
+        "prev_month": prev_month,
+        "next_month": next_month,
+        "window_start": window_start,
+        "window_end": window_end,
+        "total_distance_km": total_distance_km,
+        "avg_weekly_km": avg_weekly_km,
+        "avg_monthly_km": avg_monthly_km,
+        "can_go_next_period": offset > 0,
+    })
+
+
 @app.post("/normalize-types")
 def normalize_types_route(request: Request, db: Session = Depends(get_db)):
     changed = 0
