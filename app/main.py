@@ -370,6 +370,7 @@ SORT_COLUMNS = {
 FILTER_PARAM_KEYS = [
     "name_filter", "date_from", "date_to",
     "distance_min", "distance_max", "duration_min", "duration_max",
+    "pace_min", "pace_max",
 ]
 
 
@@ -420,6 +421,26 @@ def apply_sort_and_filters(query, request: Request):
     if duration_max:
         try:
             query = query.filter(Activity.duration_s <= float(duration_max) * 60)
+        except ValueError:
+            pass
+
+    # Pace is duration_s / (distance_m/1000), i.e. seconds per km. Filters
+    # are expressed as decimal minutes/km (e.g. 5.5 = 5:30/km), same
+    # convention as the duration filter above. Written as a multiplication
+    # rather than dividing by distance_m, so it doesn't choke on any
+    # zero-distance rows the way a direct division would.
+    pace_min = qp.get("pace_min", "").strip()
+    if pace_min:
+        try:
+            seconds_per_km = float(pace_min) * 60
+            query = query.filter(Activity.duration_s >= seconds_per_km * (Activity.distance_m / 1000.0))
+        except ValueError:
+            pass
+    pace_max = qp.get("pace_max", "").strip()
+    if pace_max:
+        try:
+            seconds_per_km = float(pace_max) * 60
+            query = query.filter(Activity.duration_s <= seconds_per_km * (Activity.distance_m / 1000.0))
         except ValueError:
             pass
 

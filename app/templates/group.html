@@ -39,11 +39,17 @@
         &ndash;
         <input type="number" step="1" min="0" name="duration_max" value="{{ filters.duration_max }}" placeholder="max" style="width: 70px;">
     </div>
+    <div class="filter-group">
+        <label for="pace_min">Pace min/km</label>
+        <input type="number" step="0.1" min="0" name="pace_min" id="pace_min" value="{{ filters.pace_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="0.1" min="0" name="pace_max" value="{{ filters.pace_max }}" placeholder="max" style="width: 70px;">
+    </div>
     <input type="hidden" name="page_size" value="{{ page_size }}">
     {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
     {% if dir %}<input type="hidden" name="dir" value="{{ dir }}">{% endif %}
     <button type="submit">Apply filters</button>
-    {% if filters.name_filter or filters.date_from or filters.date_to or filters.distance_min or filters.distance_max or filters.duration_min or filters.duration_max %}
+    {% if filters.name_filter or filters.date_from or filters.date_to or filters.distance_min or filters.distance_max or filters.duration_min or filters.duration_max or filters.pace_min or filters.pace_max %}
     <a class="button secondary" href="{{ base_path }}/group/{{ group.id }}">Clear filters</a>
     {% endif %}
 </form>

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.1
+- Fixed sort direction being stuck on descending - clicking an
+  already-sorted column now correctly toggles between ascending and
+  descending instead of always landing back on descending
+- Added a pace filter (min/km range) alongside the existing distance and
+  duration filters
+- Set the real repository URL and maintainer info for the Home Assistant
+  app listing
+
 ## 1.3.0
 - Fixed Date/Pace (and all other) table columns wrapping onto two lines -
   table cells no longer wrap at any screen size; the existing horizontal

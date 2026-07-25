@@ -1,11 +1,11 @@
 name: "Matched Runs"
-version: "1.3.0"
+version: "1.3.1"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -
   groups runs (or rides, hikes, etc.) by route, the way Strava's paid
   "matched runs" feature does, without the subscription.
-url: "https://github.com/YOUR_USERNAME/matched-runs"
+url: "https://github.com/magicmatt007/matched-runs"
 arch:
   - aarch64
   - amd64
