@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.2
+- The mobile-detection JS from 1.1.1 was inline, which Home Assistant's
+  ingress iframe may block via Content-Security-Policy while still allowing
+  external same-origin scripts (Leaflet's own script kept working, which is
+  what pointed at this). Moved it to its own static file
+  (`mobile-detect.js`) referenced via `<script src>` instead, which should
+  be far more likely to actually execute under ingress. Note: the 1.2.1
+  table-width fix was a real bug but not the actual cause of the
+  ingress-specific issue, since that CSS applies identically regardless of
+  deployment method - it's still a valid fix, just not *the* fix for this.
+
+## 1.2.1
+- Fixed the real cause of tables not going responsive on mobile: `.table`
+  had `width: 100%` which clamped it to its container, so the nowrap cells
+  meant for horizontal scrolling were just getting squished into that fixed
+  width instead of the table growing past it and actually triggering the
+  scrollable overflow. Tables now correctly widen to their content and
+  scroll horizontally within their own row on narrow screens. Also added a
+  page-level `overflow-x: hidden` safety net so the page itself never
+  scrolls sideways regardless of what's inside it.
+
 ## 1.2.0
 - Route matching is now incremental for routine imports (Garmin auto-sync,
   manual Garmin/Strava sync, and small file uploads): instead of
