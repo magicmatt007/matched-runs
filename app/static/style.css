@@ -80,11 +80,12 @@ button, .button {
 }
 button.secondary, .button.secondary { background: #2a2e38; }
 .muted { color: var(--muted); font-size: 0.9rem; }
-.table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+.table { width: auto; min-width: 100%; border-collapse: collapse; margin-top: 16px; }
 .table th, .table td {
     text-align: left;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
 }
 a { color: #6aa9ff; }
 #map { border-radius: 8px; margin: 16px 0; border: 1px solid var(--border); }
@@ -99,6 +100,31 @@ a { color: #6aa9ff; }
     width: 100%;
     max-width: 320px;
 }
+.filters input[type="text"], .filters input[type="date"], .filters input[type="number"] {
+    background: #1d212b;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    width: 110px;
+}
+.filters label {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-right: 2px;
+}
+.filters .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #1d212b;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+th a { color: var(--text); text-decoration: none; }
+th a:hover { color: var(--accent); }
 
 /* Native file inputs can overflow their container on narrow screens */
 input[type="file"] {
@@ -133,17 +159,6 @@ input[type="file"] {
     .table th, .table td {
         padding: 6px 8px;
         font-size: 0.85rem;
-        white-space: nowrap;
-    }
-    .table {
-        /* Without this, "width: 100%" (set for the desktop layout) clamps
-           the table to its container's width, which means the nowrap cells
-           above just get squished into that fixed width instead of the
-           table growing past it - which is what needs to happen for the
-           .table-responsive wrapper's overflow-x:auto to ever actually
-           kick in and let you swipe/scroll to see the rest of the columns. */
-        width: auto;
-        min-width: 100%;
     }
     .grid {
         grid-template-columns: 1fr;
@@ -178,11 +193,6 @@ html.is-mobile #map {
 html.is-mobile .table th, html.is-mobile .table td {
     padding: 6px 8px;
     font-size: 0.85rem;
-    white-space: nowrap;
-}
-html.is-mobile .table {
-    width: auto;
-    min-width: 100%;
 }
 html.is-mobile .grid {
     grid-template-columns: 1fr;

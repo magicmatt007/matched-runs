@@ -4,7 +4,7 @@ import os
 import gzip
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request, UploadFile, Depends, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -353,6 +353,109 @@ def paginate(query, page: int, page_size: int):
     return items, page, total_pages, total, page_size
 
 
+SORT_COLUMNS = {
+    "date": Activity.start_time,
+    "name": Activity.name,
+    "type": Activity.activity_type,
+    "distance": Activity.distance_m,
+    "duration": Activity.duration_s,
+    # Pace isn't a stored column - sort by the same ratio used to display
+    # it. SQLite returns NULL (sorts first) rather than erroring on a
+    # distance_m of 0, which is an acceptable edge case here.
+    "pace": Activity.duration_s * 1000.0 / Activity.distance_m,
+}
+
+# Query param keys used for the per-column filters, shared between the home
+# activity list and the group detail page's activity table.
+FILTER_PARAM_KEYS = [
+    "name_filter", "date_from", "date_to",
+    "distance_min", "distance_max", "duration_min", "duration_max",
+]
+
+
+def apply_sort_and_filters(query, request: Request):
+    """Applies the shared column filters + sort order (query params: sort,
+    dir, name_filter, date_from, date_to, distance_min/max in km,
+    duration_min/max in minutes) to an Activity query."""
+    qp = request.query_params
+
+    name_filter = qp.get("name_filter", "").strip()
+    if name_filter:
+        query = query.filter(Activity.name.ilike(f"%{name_filter}%"))
+
+    date_from = qp.get("date_from", "").strip()
+    if date_from:
+        try:
+            query = query.filter(Activity.start_time >= datetime.strptime(date_from, "%Y-%m-%d"))
+        except ValueError:
+            pass
+    date_to = qp.get("date_to", "").strip()
+    if date_to:
+        try:
+            # Inclusive of the whole selected day.
+            query = query.filter(Activity.start_time < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1))
+        except ValueError:
+            pass
+
+    distance_min = qp.get("distance_min", "").strip()
+    if distance_min:
+        try:
+            query = query.filter(Activity.distance_m >= float(distance_min) * 1000)
+        except ValueError:
+            pass
+    distance_max = qp.get("distance_max", "").strip()
+    if distance_max:
+        try:
+            query = query.filter(Activity.distance_m <= float(distance_max) * 1000)
+        except ValueError:
+            pass
+
+    duration_min = qp.get("duration_min", "").strip()
+    if duration_min:
+        try:
+            query = query.filter(Activity.duration_s >= float(duration_min) * 60)
+        except ValueError:
+            pass
+    duration_max = qp.get("duration_max", "").strip()
+    if duration_max:
+        try:
+            query = query.filter(Activity.duration_s <= float(duration_max) * 60)
+        except ValueError:
+            pass
+
+    sort = qp.get("sort", "date")
+    if sort not in SORT_COLUMNS:
+        sort = "date"
+    direction = qp.get("dir", "desc")
+    if direction not in ("asc", "desc"):
+        direction = "desc"
+
+    col = SORT_COLUMNS[sort]
+    query = query.order_by(col.asc() if direction == "asc" else col.desc())
+
+    return query, sort, direction
+
+
+def build_carry_params(request: Request, include_type: bool = True):
+    """Every currently-active filter/sort query param, for reuse in
+    pagination links and sortable column headers so they don't reset each
+    other. Deliberately excludes 'page' - changing a filter or sort should
+    land back on page 1."""
+    qp = request.query_params
+    params = {}
+    if include_type and qp.get("type"):
+        params["type"] = qp.get("type")
+    for key in FILTER_PARAM_KEYS:
+        v = qp.get(key, "").strip()
+        if v:
+            params[key] = v
+    if qp.get("sort"):
+        params["sort"] = qp.get("sort")
+    if qp.get("dir"):
+        params["dir"] = qp.get("dir")
+    return params
+
+
 @app.get("/activities")
 def activities_old_url_redirect(request: Request, type: str = None, page: int = 1,
                                  page_size: int = DEFAULT_PAGE_SIZE):
@@ -365,9 +468,10 @@ def activities_old_url_redirect(request: Request, type: str = None, page: int = 
 @app.get("/", response_class=HTMLResponse)
 def activities_list(request: Request, type: str = None, page: int = 1,
                      page_size: int = DEFAULT_PAGE_SIZE, db: Session = Depends(get_db)):
-    query = db.query(Activity).order_by(Activity.start_time.desc())
+    query = db.query(Activity)
     if type:
         query = query.filter(Activity.activity_type == type)
+    query, sort, direction = apply_sort_and_filters(query, request)
     activities, page, total_pages, total, page_size = paginate(query, page, page_size)
 
     types = sorted({
@@ -384,6 +488,10 @@ def activities_list(request: Request, type: str = None, page: int = 1,
         "total": total,
         "page_size": page_size,
         "page_size_options": PAGE_SIZE_OPTIONS,
+        "sort": sort,
+        "dir": direction,
+        "filters": {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS},
+        "carry_params": build_carry_params(request),
     })
 
 
@@ -394,10 +502,24 @@ def group_detail(group_id: int, request: Request, page: int = 1,
     if not group:
         return local_redirect(request, "/")
 
-    activities_query = (
-        db.query(Activity).filter_by(group_id=group_id).order_by(Activity.start_time.desc())
-    )
+    activities_query = db.query(Activity).filter_by(group_id=group_id)
+    activities_query, sort, direction = apply_sort_and_filters(activities_query, request)
     activities, page, total_pages, total, page_size = paginate(activities_query, page, page_size)
+
+    # Pace-over-time chart data: always chronological (oldest to newest),
+    # independent of whatever sort the table itself is using.
+    chart_activities = sorted(
+        (a for a in group.activities if a.start_time and a.duration_s and a.distance_m),
+        key=lambda a: a.start_time,
+    )
+    chart_points = [
+        {
+            "date": a.start_time.strftime("%Y-%m-%d"),
+            "pace_s_per_km": a.duration_s / (a.distance_m / 1000.0),
+            "activity_id": a.id,
+        }
+        for a in chart_activities
+    ]
 
     return templates.TemplateResponse("group.html", {
         "request": request,
@@ -408,6 +530,11 @@ def group_detail(group_id: int, request: Request, page: int = 1,
         "total": total,
         "page_size": page_size,
         "page_size_options": PAGE_SIZE_OPTIONS,
+        "sort": sort,
+        "dir": direction,
+        "filters": {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS},
+        "carry_params": build_carry_params(request, include_type=False),
+        "chart_points": chart_points,
     })
 
 

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
 {% from "_pagination.html" import pagination_controls %}
+{% from "_table_controls.html" import sort_link %}
 {% block title %}{{ group.name }}{% endblock %}
 {% block content %}
 
@@ -10,11 +11,58 @@
 
 <div id="map" style="height: 480px;"></div>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, {}) }}
+<div class="panel">
+    <h3 style="margin-top:0;">Pace over time</h3>
+    <div id="pace-chart"></div>
+</div>
+
+<form method="get" action="{{ base_path }}/group/{{ group.id }}" class="row filters" style="margin: 12px 0; flex-wrap: wrap;">
+    <div class="filter-group">
+        <label for="name_filter">Name contains</label>
+        <input type="text" name="name_filter" id="name_filter" value="{{ filters.name_filter }}" placeholder="e.g. morning">
+    </div>
+    <div class="filter-group">
+        <label for="date_from">From</label>
+        <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+        <label for="date_to">To</label>
+        <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="filter-group">
+        <label for="distance_min">Distance km</label>
+        <input type="number" step="0.1" min="0" name="distance_min" id="distance_min" value="{{ filters.distance_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="0.1" min="0" name="distance_max" value="{{ filters.distance_max }}" placeholder="max" style="width: 70px;">
+    </div>
+    <div class="filter-group">
+        <label for="duration_min">Duration min</label>
+        <input type="number" step="1" min="0" name="duration_min" id="duration_min" value="{{ filters.duration_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="1" min="0" name="duration_max" value="{{ filters.duration_max }}" placeholder="max" style="width: 70px;">
+    </div>
+    <input type="hidden" name="page_size" value="{{ page_size }}">
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if dir %}<input type="hidden" name="dir" value="{{ dir }}">{% endif %}
+    <button type="submit">Apply filters</button>
+    {% if filters.name_filter or filters.date_from or filters.date_to or filters.distance_min or filters.distance_max or filters.duration_min or filters.duration_max %}
+    <a class="button secondary" href="{{ base_path }}/group/{{ group.id }}">Clear filters</a>
+    {% endif %}
+</form>
+
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, carry_params) }}
 
 <div class="table-responsive">
 <table class="table">
-    <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Source</th></tr></thead>
+    <thead>
+        <tr>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "date", "Date", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "name", "Name", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "type", "Type", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "distance", "Distance", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "duration", "Duration", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "pace", "Pace", carry_params) }}</th>
+            <th>Source</th>
+        </tr>
+    </thead>
     <tbody>
     {% for a in activities %}
         <tr>
@@ -31,7 +79,7 @@
 </table>
 </div>
 
-{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, {}) }}
+{{ pagination_controls(page, total_pages, total, page_size, page_size_options, base_path ~ "/group/" ~ group.id, carry_params) }}
 
 <script>
 const map = L.map('map');
@@ -52,6 +100,73 @@ if (bounds.length) {
 } else {
     map.setView([0,0], 2);
 }
+</script>
+
+<script>
+(function () {
+    var points = {{ chart_points | tojson }};
+    var container = document.getElementById('pace-chart');
+    if (!container) return;
+    if (points.length === 0) {
+        container.innerHTML = '<p class="muted">Not enough data for a pace chart yet.</p>';
+        return;
+    }
+
+    var width = 800, height = 220;
+    var padding = { top: 16, right: 16, bottom: 16, left: 64 };
+    var plotW = width - padding.left - padding.right;
+    var plotH = height - padding.top - padding.bottom;
+
+    var paces = points.map(function (p) { return p.pace_s_per_km; });
+    var minPace = Math.min.apply(null, paces);
+    var maxPace = Math.max.apply(null, paces);
+    if (minPace === maxPace) { minPace -= 30; maxPace += 30; }
+    var pad = (maxPace - minPace) * 0.15;
+    minPace -= pad;
+    maxPace += pad;
+
+    function xFor(i) {
+        if (points.length === 1) return padding.left + plotW / 2;
+        return padding.left + (i / (points.length - 1)) * plotW;
+    }
+    function yFor(pace) {
+        // Inverted on purpose: a faster (lower seconds) pace sits higher on
+        // the chart, matching the convention Strava's own pace chart uses.
+        return padding.top + ((pace - minPace) / (maxPace - minPace)) * plotH;
+    }
+    function formatPace(s) {
+        var m = Math.floor(s / 60);
+        var sec = Math.round(s % 60);
+        return m + ':' + String(sec).padStart(2, '0') + ' /km';
+    }
+
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%; height:220px;">';
+
+    var tickCount = 4;
+    for (var t = 0; t <= tickCount; t++) {
+        var pace = minPace + (t / tickCount) * (maxPace - minPace);
+        var y = yFor(pace);
+        svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
+        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="#8b8f9a">' + formatPace(pace) + '</text>';
+    }
+
+    var linePoints = points.map(function (p, i) { return xFor(i) + ',' + yFor(p.pace_s_per_km); }).join(' ');
+    svg += '<polyline points="' + linePoints + '" fill="none" stroke="#fc5200" stroke-width="2" />';
+
+    points.forEach(function (p, i) {
+        var x = xFor(i), y = yFor(p.pace_s_per_km);
+        var isLast = i === points.length - 1;
+        var r = isLast ? 6 : 4;
+        var fill = isLast ? '#fc5200' : '#1d212b';
+        svg += '<a href="{{ base_path }}/activity/' + p.activity_id + '">' +
+               '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="#fc5200" stroke-width="2">' +
+               '<title>' + p.date + ' - ' + formatPace(p.pace_s_per_km) + '</title>' +
+               '</circle></a>';
+    });
+
+    svg += '</svg>';
+    container.innerHTML = svg;
+})();
 </script>
 
 {% endblock %}

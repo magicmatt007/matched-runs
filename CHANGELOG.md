@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0
+- Fixed Date/Pace (and all other) table columns wrapping onto two lines -
+  table cells no longer wrap at any screen size; the existing horizontal
+  scroll wrapper handles any overflow instead
+- All activity list tables (home page and each route's page) now support
+  clicking a column header to sort by it (Date, Name, Type, Distance,
+  Duration, Pace), plus per-column filters: name contains, date range,
+  distance range, duration range - in addition to the existing type filter
+  on the home page. Sort/filter state persists across pagination and page
+  size changes
+- Added a pace-over-time chart to each route's page, similar to Strava's -
+  plots pace per run chronologically with the faster pace higher on the
+  chart, hoverable for exact date/pace, and clickable through to that run.
+  Implemented as a small hand-rolled SVG (no new dependency added)
+
 ## 1.2.2
 - The mobile-detection JS from 1.1.1 was inline, which Home Assistant's
   ingress iframe may block via Content-Security-Policy while still allowing

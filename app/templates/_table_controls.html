@@ -1,0 +1,4 @@
+{% macro sort_link(base_url, current_sort, current_dir, column, label, carry_params) %}
+{% set next_dir = 'asc' if (current_sort == column and current_dir == 'asc') else 'desc' %}
+<a href="{{ base_url }}?sort={{ column }}&dir={{ next_dir }}{% for k, v in carry_params.items() if k not in ['sort', 'dir'] %}&{{ k }}={{ v }}{% endfor %}">{{ label }}{% if current_sort == column %}{% if current_dir == 'asc' %} &uarr;{% else %} &darr;{% endif %}{% endif %}</a>
+{% endmacro %}
