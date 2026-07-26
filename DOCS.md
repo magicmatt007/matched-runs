@@ -30,8 +30,19 @@ resulting session token is kept.
 ## Ingress vs. direct port
 
 This app works through Home Assistant's sidebar (ingress) with no setup.
-However, **Strava's OAuth "Connect Strava" button needs a stable, fixed
-callback URL** - ingress URLs are dynamic per-session tokens, so that flow
-only works via the app's direct port (enabled by default in this app's
-network settings), not through ingress. If you don't use Strava sync, you
-can ignore this and close the direct port.
+However, two things need the app's direct port instead:
+
+- **Strava's OAuth "Connect Strava" button needs a stable, fixed callback
+  URL** - ingress URLs are dynamic per-session tokens, so that flow only
+  works via the direct port (enabled by default in this app's network
+  settings), not through ingress.
+- **Importing a database larger than 16MB** (Import & Sync → Database
+  export/import) fails through ingress with `Maximum request body size
+  16777216 exceeded` - this is a hardcoded limit in Home Assistant's
+  Supervisor itself (not something this app can work around), the same
+  issue other add-ons like OctoPrint have hit for large file uploads. Go
+  to `http://<your-ha-host>:8000/manage` directly instead of the sidebar
+  for this specific action; export/download isn't affected, only import.
+
+If you don't need either of those, you can ignore this and close the
+direct port.

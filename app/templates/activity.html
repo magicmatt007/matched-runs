@@ -19,6 +19,49 @@
 <p class="muted">No matches found yet for this route.</p>
 {% endif %}
 
+{% if activity.elevation_gain_m is not none or activity.elevation_loss_m is not none
+      or activity.avg_heart_rate is not none or activity.max_heart_rate is not none
+      or activity.avg_cadence is not none or activity.calories is not none %}
+<div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+    {% if activity.elevation_gain_m is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Elevation gain</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.elevation_gain_m) }} m</div>
+    </div>
+    {% endif %}
+    {% if activity.elevation_loss_m is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Elevation loss</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.elevation_loss_m) }} m</div>
+    </div>
+    {% endif %}
+    {% if activity.avg_heart_rate is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Avg heart rate</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.avg_heart_rate) }} bpm</div>
+    </div>
+    {% endif %}
+    {% if activity.max_heart_rate is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Max heart rate</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.max_heart_rate) }} bpm</div>
+    </div>
+    {% endif %}
+    {% if activity.avg_cadence is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Avg cadence</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.avg_cadence) }} spm</div>
+    </div>
+    {% endif %}
+    {% if activity.calories is not none %}
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Calories</div>
+        <div style="font-size: 1.3rem; font-weight: 700;">{{ "%.0f"|format(activity.calories) }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 <div id="map" style="height: 480px;"></div>
 
 <script>

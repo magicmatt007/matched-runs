@@ -45,5 +45,11 @@ def run_migrations():
 
     ensure_column("strava_token", "scope", "VARCHAR")
     ensure_column("activities", "activity_type", "VARCHAR DEFAULT 'Other'")
+    ensure_column("activities", "elevation_gain_m", "FLOAT")
+    ensure_column("activities", "elevation_loss_m", "FLOAT")
+    ensure_column("activities", "avg_heart_rate", "FLOAT")
+    ensure_column("activities", "max_heart_rate", "FLOAT")
+    ensure_column("activities", "avg_cadence", "FLOAT")
+    ensure_column("activities", "calories", "FLOAT")
 
     conn.close()

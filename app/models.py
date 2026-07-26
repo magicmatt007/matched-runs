@@ -29,6 +29,15 @@ class Activity(Base):
     distance_m = Column(Float, default=0.0)
     duration_s = Column(Float, nullable=True)
 
+    # All nullable - not every source/file provides every field, and older
+    # already-imported activities won't have these until re-synced/re-uploaded.
+    elevation_gain_m = Column(Float, nullable=True)
+    elevation_loss_m = Column(Float, nullable=True)
+    avg_heart_rate = Column(Float, nullable=True)
+    max_heart_rate = Column(Float, nullable=True)
+    avg_cadence = Column(Float, nullable=True)
+    calories = Column(Float, nullable=True)
+
     # Full track points (for drawing on the map), JSON list of [lat, lon]
     full_points_json = Column(Text, nullable=False)
     # Resampled fixed-length points used for matching, JSON list of [lat, lon]

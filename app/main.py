@@ -60,16 +60,28 @@ def local_redirect(request: Request, path: str, status_code: int = 303) -> Redir
 
 def _save_activity(db: Session, source: str, external_id: str, name: str,
                     points, distance_m: float, duration_s, start_time,
-                    activity_type: str = None):
+                    activity_type: str = None, elevation_gain_m=None,
+                    elevation_loss_m=None, avg_heart_rate=None,
+                    max_heart_rate=None, avg_cadence=None, calories=None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
 
+    extra_fields = {
+        "elevation_gain_m": elevation_gain_m,
+        "elevation_loss_m": elevation_loss_m,
+        "avg_heart_rate": avg_heart_rate,
+        "max_heart_rate": max_heart_rate,
+        "avg_cadence": avg_cadence,
+        "calories": calories,
+    }
+
     if existing:
         # Re-imported (e.g. re-uploading the same export after an app update
-        # added new fields, such as activity_type). Backfill in place rather
-        # than silently skipping, so re-uploading is enough to pick up new
-        # fields without needing to wipe and reimport everything.
+        # added new fields, such as activity_type or these newer ones).
+        # Backfill in place rather than silently skipping, so re-uploading
+        # is enough to pick up new fields without needing to wipe and
+        # reimport everything.
         changed = False
         if existing.activity_type != activity_type:
             existing.activity_type = activity_type
@@ -77,6 +89,10 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         if name and existing.name != name:
             existing.name = name
             changed = True
+        for field, value in extra_fields.items():
+            if value is not None and getattr(existing, field) != value:
+                setattr(existing, field, value)
+                changed = True
         return ("updated" if changed else "unchanged", existing)
 
     # Cross-source duplicate check: the same real-world activity imported
@@ -100,6 +116,9 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             dup.start_time = start_time
             dup.full_points_json = json.dumps(points)
             dup.resampled_points_json = json.dumps(resampled)
+            for field, value in extra_fields.items():
+                if value is not None:
+                    setattr(dup, field, value)
             return ("updated", dup)
         else:
             return ("unchanged", dup)  # lower/equal priority source - discard the new one
@@ -115,6 +134,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         duration_s=duration_s,
         full_points_json=json.dumps(points),
         resampled_points_json=json.dumps(resampled),
+        **extra_fields,
     )
     db.add(activity)
     return ("added", activity)
@@ -288,6 +308,12 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
             name=final_name, points=parsed["points"],
             distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
             start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
+            elevation_gain_m=parsed.get("elevation_gain_m"),
+            elevation_loss_m=parsed.get("elevation_loss_m"),
+            avg_heart_rate=parsed.get("avg_heart_rate"),
+            max_heart_rate=parsed.get("max_heart_rate"),
+            avg_cadence=parsed.get("avg_cadence"),
+            calories=parsed.get("calories"),
         )
         if status == "added":
             added += 1
@@ -596,14 +622,12 @@ def _add_months(dt: datetime, delta_months: int) -> datetime:
 
 
 def _year_window(offset: int):
-    """Trailing 12 *complete* calendar months, not a rolling 365-day
-    window - e.g. on any day in July 2026, offset=0 means July 2025 through
-    June 2026 (the current, still-in-progress month is deliberately
-    excluded). offset=1 shifts back another 12 months, etc."""
+    """12 calendar months ending with the CURRENT month (offset=0), e.g. on
+    any day in July 2026, that's August 2025 through July 2026, including
+    the still-in-progress July. offset=1 shifts the whole window back by
+    12 months, etc."""
     today = datetime.utcnow().date()
-    this_month_start = datetime(today.year, today.month, 1)
-    last_complete_month_start = _add_months(this_month_start, -1)
-    end_month_start = _add_months(last_complete_month_start, -12 * offset)
+    end_month_start = _add_months(datetime(today.year, today.month, 1), -12 * offset)
     start_month_start = _add_months(end_month_start, -11)
     window_start = start_month_start
     window_end = _add_months(end_month_start, 1) - timedelta(seconds=1)
@@ -676,6 +700,7 @@ def training_log(request: Request, type: str = None, period: str = "7d",
             g = groups.setdefault(key, {
                 "month": key,
                 "label": a.start_time.strftime("%B %Y"),
+                "chart_label": a.start_time.strftime("%b"),
                 "count": 0,
                 "distance_m": 0.0,
             })
@@ -687,19 +712,23 @@ def training_log(request: Request, type: str = None, period: str = "7d",
         while cursor <= window_end:
             key = cursor.strftime("%Y-%m")
             groups.setdefault(key, {
-                "month": key, "label": cursor.strftime("%B %Y"), "count": 0, "distance_m": 0.0,
+                "month": key, "label": cursor.strftime("%B %Y"),
+                "chart_label": cursor.strftime("%b"), "count": 0, "distance_m": 0.0,
             })
             cursor = _add_months(cursor, 1)
         month_groups = sorted(groups.values(), key=lambda g: g["month"], reverse=True)
 
     # Chart data: always chronological (oldest to newest), independent of
     # the table/card display order above. Monthly buckets for the 1y
-    # overview, daily buckets otherwise (7d, 4w, and month drill-down all
-    # get a sensible day-by-day axis this way, without special-casing
-    # drill-down separately).
+    # overview (using the short 3-letter month label - any 12 consecutive
+    # calendar months always contain each month name exactly once, so this
+    # stays unambiguous without needing a year suffix), daily buckets
+    # otherwise (7d, 4w, and month drill-down all get a sensible
+    # day-by-day axis this way, without special-casing drill-down
+    # separately).
     if mode == "monthly":
         chart_data = [
-            {"label": g["label"], "distance_m": g["distance_m"]}
+            {"label": g["chart_label"], "distance_m": g["distance_m"]}
             for g in sorted(month_groups, key=lambda g: g["month"])
         ]
     else:
@@ -988,6 +1017,15 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
             name=a.get("name", "Run"), points=points,
             distance_m=a.get("distance", 0.0), duration_s=a.get("moving_time"),
             start_time=start_time, activity_type=a.get("type"),
+            # Strava's summary activity resource doesn't include a separate
+            # elevation "loss" field (only gain), and calories requires a
+            # separate per-activity detail API call we're not making here
+            # (would multiply the number of requests per sync) - both left
+            # as None for Strava-sourced activities.
+            elevation_gain_m=a.get("total_elevation_gain"),
+            avg_heart_rate=a.get("average_heartrate"),
+            max_heart_rate=a.get("max_heartrate"),
+            avg_cadence=a.get("average_cadence"),
         )
         if status == "added":
             added += 1
@@ -1062,11 +1100,27 @@ def do_garmin_sync(db: Session):
         distance_m = a.get("distance") or parsed["distance_m"]
         duration_s = a.get("duration") or parsed["duration_s"]
 
+        # Prefer Garmin's own device-computed elevation figures; fall back
+        # to what we can derive from the downloaded GPX's own elevation
+        # points if the API doesn't have them for some reason.
+        elevation_gain_m = a.get("elevationGain")
+        if elevation_gain_m is None:
+            elevation_gain_m = parsed.get("elevation_gain_m")
+        elevation_loss_m = a.get("elevationLoss")
+        if elevation_loss_m is None:
+            elevation_loss_m = parsed.get("elevation_loss_m")
+
         status, activity = _save_activity(
             db, source="garmin", external_id=str(activity_id),
             name=name, points=parsed["points"], distance_m=distance_m,
             duration_s=duration_s, start_time=parsed["start_time"],
             activity_type=activity_type,
+            elevation_gain_m=elevation_gain_m,
+            elevation_loss_m=elevation_loss_m,
+            avg_heart_rate=a.get("averageHR"),
+            max_heart_rate=a.get("maxHR"),
+            avg_cadence=a.get("averageRunningCadenceInStepsPerMinute") or a.get("averageBikingCadenceInRevPerMinute"),
+            calories=a.get("calories"),
         )
         if status == "added":
             added += 1

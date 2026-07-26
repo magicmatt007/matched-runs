@@ -38,6 +38,16 @@
         matching on a faster machine (e.g. a desktop instead of a Raspberry
         Pi), then moving the already-populated database over to wherever
         you actually run the app day to day.</p>
+    {% if base_path %}
+    <p style="color:#f58231;">You're viewing this through Home Assistant's
+        ingress sidebar right now. If your database is larger than ~16MB,
+        <strong>importing</strong> it here will fail with "Maximum request
+        body size exceeded" - that's a hardcoded Supervisor limit on
+        ingress traffic, not something this app can work around. Use the
+        direct port instead for the import specifically, e.g.
+        <code>http://&lt;your-ha-host&gt;:8000/manage</code> - export/download
+        isn't affected, only import.</p>
+    {% endif %}
     <div class="row">
         <a class="button" href="{{ base_path }}/manage/export-db">Export database</a>
     </div>

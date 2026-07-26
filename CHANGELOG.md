@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.6.1
+- Documented the Home Assistant ingress 16MB request-body limit (a hardcoded
+  Supervisor restriction, not something this app can fix) that breaks
+  importing a large database through the sidebar - added to DOCS.md, and
+  also as a context-aware in-app warning on the Import & Sync page that
+  only appears when you're actually viewing through ingress, pointing you
+  at the direct port for that specific action instead.
+
+## 1.6.0
+- Now captures and shows elevation gain/loss, average/max heart rate,
+  average cadence, and calories on the activity detail page (only the
+  fields actually available for that activity are shown - most sources
+  won't have all of them).
+  - **FIT files**: prefers the device-computed session totals for
+    ascent/descent/HR/cadence/calories; falls back to deriving
+    elevation from point-level altitude if the session summary omits it.
+  - **TCX files**: heart rate/cadence from trackpoints (aggregates
+    correctly across multiple laps), calories/HR fallback from lap
+    summaries, elevation derived from trackpoint altitude.
+  - **GPX files**: elevation always available if the file has it; heart
+    rate/cadence only if the exporting device included Garmin's
+    TrackPointExtension - hit or miss depending on the export, unlike
+    FIT/TCX where it's more consistently present.
+  - **Garmin live sync**: pulls average/max heart rate, cadence, and
+    calories directly from Garmin's own activity summary (confirmed
+    field names against real API response samples); elevation gain/loss
+    field names are best-effort and fall back to GPX-derived values if
+    absent.
+  - **Strava sync**: elevation gain, average/max heart rate, and average
+    cadence from Strava's documented summary activity fields. No
+    elevation loss or calories (Strava doesn't expose loss in the
+    summary, and calories needs a separate per-activity API call we're
+    not making to avoid multiplying request volume per sync).
+  - Existing already-imported activities won't have these until
+    re-synced or re-uploaded - same backfill-on-reimport pattern used
+    when activity_type was added.
+  - Verified the elevation gain/loss math and the TCX field extraction
+    (multi-value HR/cadence averaging, lap-level calories) against
+    synthetic test files before shipping.
+
+## 1.5.1
+- Training Log 1-year view now includes the current in-progress month
+  (e.g. on any day in July, shows August last year through July this year)
+  instead of ending at the last complete month
+- Shortened the 1-year chart's month labels to 3 letters (Jul, Aug, ...)
+  instead of the full name - the overview cards still show the full month
+  name, only the chart axis changed. Verified that 12 consecutive months
+  always produce 12 distinct 3-letter labels (no year needed to
+  disambiguate) before relying on that assumption.
+
 ## 1.5.0
 - Training Log: defaults to "Running" when available; the 1-year view now
   shows the trailing 12 *complete* calendar months (e.g. on any day in
