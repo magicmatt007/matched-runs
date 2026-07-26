@@ -367,6 +367,7 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
         "db_imported": request.query_params.get("db_imported") == "1",
         "import_job": _current_import_job,
+        "garmin_sync_job": _current_garmin_sync_job,
     })
 
 
@@ -422,7 +423,7 @@ async def upload_gpx(request: Request):
         else:
             files_data.append((filename, content))
 
-    if not files_data:
+    if not files_data and not name_overrides:
         return local_redirect(request, "/manage?imported=0&updated=0&skipped=0&duplicates=0&unsupported=0")
 
     _current_import_job.clear()
@@ -1130,20 +1131,34 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
 
 # ---------------- Garmin Connect auto-sync (unofficial) ----------------
 
-def do_garmin_sync(db: Session):
+def do_garmin_sync(db: Session, job=None):
     """Shared by the manual 'Sync from Garmin' button and the background
-    loop. Returns (added, updated). Raises GarminAuthError on login failure."""
+    loop. Returns (added, updated). Raises GarminAuthError on login failure.
+    `job`, if given, gets live progress written into it (used by the manual
+    button's progress UI; the background auto-sync loop doesn't pass one,
+    since there's no UI watching it)."""
+    if job is not None:
+        job["phase"] = "connecting"
     client = garmin_client.get_client()
 
     sync_state = db.query(GarminSyncState).first()
     last_checked = sync_state.last_checked_at if sync_state else None
 
+    if job is not None:
+        job["phase"] = "fetching"
     new_activities = garmin_client.fetch_new_activities(client, after=last_checked)
+
+    if job is not None:
+        job["phase"] = "syncing"
+        job["total"] = len(new_activities)
+        job["processed"] = 0
 
     added, updated = 0, 0
     added_activities = []
     newest_seen = last_checked
     for a in new_activities:
+        if job is not None:
+            job["processed"] += 1
         activity_id = a.get("activityId")
         if not activity_id:
             continue
@@ -1219,14 +1234,27 @@ def do_garmin_sync(db: Session):
     added_ids = [a.id for a in added_activities]
     db.commit()
 
+    if job is not None:
+        job["phase"] = "matching"
+        job["match_done"] = 0
+        job["match_total"] = 0
+
+        def _report_match_progress(done, total):
+            job["match_done"] = done
+            job["match_total"] = total
+
+        progress_cb = _report_match_progress
+    else:
+        progress_cb = None
+
     if updated:
-        rebuild_groups(db)
+        rebuild_groups(db, progress_callback=progress_cb)
     elif added_ids:
         if len(added_ids) > 20:
             # A big catch-up sync (e.g. the very first run after connecting,
             # pulling in a lot of history at once) - not meaningfully
             # cheaper to do incrementally than just rebuilding fully.
-            rebuild_groups(db)
+            rebuild_groups(db, progress_callback=progress_cb)
         else:
             # The routine case: a scheduled sync bringing in a handful of
             # new activities. This is the specific path that used to pay a
@@ -1237,14 +1265,64 @@ def do_garmin_sync(db: Session):
     return added, updated
 
 
-@app.post("/garmin/sync")
-def garmin_sync_route(request: Request, db: Session = Depends(get_db)):
+_current_garmin_sync_job = {"active": False}
+
+
+def _run_garmin_sync_background(job):
+    """Runs the manual 'Sync from Garmin now' button's work on a background
+    thread, same reasoning as _run_import_sync - keeps the progress-polling
+    endpoint responsive while a slow first sync (or a big catch-up sync)
+    runs, and lets it keep going if you navigate away."""
+    db = SessionLocal()
     try:
-        added, updated = do_garmin_sync(db)
+        added, updated = do_garmin_sync(db, job=job)
+        job["phase"] = "done"
+        job["added"] = added
+        job["updated"] = updated
     except garmin_client.GarminAuthError as e:
+        job["phase"] = "error"
+        job["error"] = str(e)
+    except Exception as e:
+        logger.exception("Garmin sync job failed")
+        job["phase"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["active"] = False
+        db.close()
+
+
+@app.post("/garmin/sync")
+async def garmin_sync_route(request: Request):
+    if _current_garmin_sync_job.get("active"):
         prefix = ingress_prefix(request)
-        return HTMLResponse(f"<p>{e}</p><p><a href='{prefix}/'>back</a></p>", status_code=401)
-    return local_redirect(request, f"/manage?imported={added}&updated={updated}&skipped=0&duplicates=0&unsupported=0")
+        return HTMLResponse(
+            "<p>A Garmin sync is already running. Check the Import &amp; Sync "
+            "page for its progress.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=409,
+        )
+    if not (garmin_client.is_configured() or garmin_client.has_saved_session()):
+        return local_redirect(request, "/manage")
+
+    _current_garmin_sync_job.clear()
+    _current_garmin_sync_job.update({
+        "active": True,
+        "phase": "connecting",
+        "processed": 0,
+        "total": 0,
+        "match_done": 0,
+        "match_total": 0,
+        "started_at": time.time(),
+        "added": 0, "updated": 0,
+        "error": None,
+    })
+    _spawn_background_task(asyncio.to_thread(_run_garmin_sync_background, _current_garmin_sync_job))
+    return local_redirect(request, "/manage")
+
+
+@app.get("/manage/garmin-sync-status")
+def garmin_sync_status():
+    return _current_garmin_sync_job
 
 
 @app.get("/garmin/login", response_class=HTMLResponse)

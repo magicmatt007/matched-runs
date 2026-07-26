@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.1
+- Fixed activities.csv-only uploads (re-uploading just the CSV, without the
+  activity files, to backfill names after the fact) doing nothing despite
+  logging "Loaded N titles" - a regression from 1.8.0's background-job
+  refactor: the route returned early whenever there were no other files in
+  the upload, before ever spawning the background job that actually
+  applies the name backfill. Uploading the CSV alone now correctly
+  triggers that backfill.
+- Manual "Sync from Garmin now" now runs as a background job with the same
+  live progress UI the bulk import got in 1.8.0 (connecting → checking for
+  new activities → syncing N/M → matching, then a done/error summary) -
+  previously this blocked the request with zero feedback, which was most
+  noticeable on a first sync pulling in a lot of history at once.
+
 ## 1.8.0
 - Uploads now run as a real background job instead of blocking the whole
   request until finished: the Import & Sync page shows a live progress bar

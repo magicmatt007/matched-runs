@@ -149,6 +149,11 @@
     {% endif %}
 </section>
 
+<section class="panel" id="garmin-progress-panel" style="display:none;">
+    <h2>Garmin sync progress</h2>
+    <div id="garmin-progress-content"></div>
+</section>
+
 <section class="panel">
     <h2>Matched routes ({{ groups|length }})</h2>
     {% if not groups %}
@@ -181,10 +186,8 @@
 
 <script>
 (function () {
-    var panel = document.getElementById('import-progress-panel');
-    var content = document.getElementById('import-progress-content');
-    var pollTimer = null;
-
+    // Shared helpers between the import-progress and Garmin-sync-progress
+    // panels below, so the ETA/progress-bar logic isn't duplicated twice.
     function formatDuration(seconds) {
         if (seconds < 0 || !isFinite(seconds)) return null;
         if (seconds < 60) return Math.round(seconds) + 's';
@@ -209,52 +212,125 @@
         return '<p class="muted">Estimated time remaining: ~' + (formatted || 'unknown') + '</p>';
     }
 
-    function render(job) {
-        if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
-            panel.style.display = 'none';
-            return;
+    function indeterminateLine(text) {
+        return '<p>' + text + '&hellip;</p>' +
+               '<div style="background:#1d212b; border-radius:6px; height:16px; overflow:hidden; margin: 6px 0;">' +
+               '<div style="background:#fc5200; height:100%; width:30%; animation: matched-runs-indeterminate 1.2s ease-in-out infinite;"></div></div>';
+    }
+
+    // --- Import progress ---
+    (function () {
+        var panel = document.getElementById('import-progress-panel');
+        var content = document.getElementById('import-progress-content');
+        var pollTimer = null;
+
+        function render(job) {
+            if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+
+            if (job.phase === 'importing') {
+                var frac = job.total > 0 ? job.processed / job.total : 0;
+                content.innerHTML =
+                    '<p>Importing files: ' + job.processed + ' / ' + job.total + '</p>' +
+                    progressBar(frac) +
+                    etaLine(frac, job.started_at);
+            } else if (job.phase === 'matching') {
+                var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
+                content.innerHTML =
+                    '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' +
+                    progressBar(frac) +
+                    etaLine(frac, job.started_at);
+            } else if (job.phase === 'done') {
+                content.innerHTML =
+                    '<p><strong>' + job.added + '</strong> newly imported, ' +
+                    '<strong>' + job.updated + '</strong> updated, ' +
+                    '<strong>' + job.unchanged + '</strong> unchanged, ' +
+                    '<strong>' + job.skipped + '</strong> skipped' +
+                    (job.unsupported ? ' (' + job.unsupported + ' unsupported file type)' : '') + '.</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            } else if (job.phase === 'error') {
+                content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
         }
-        panel.style.display = 'block';
 
-        if (job.phase === 'importing') {
-            var frac = job.total > 0 ? job.processed / job.total : 0;
-            content.innerHTML =
-                '<p>Importing files: ' + job.processed + ' / ' + job.total + '</p>' +
-                progressBar(frac) +
-                etaLine(frac, job.started_at);
-        } else if (job.phase === 'matching') {
-            var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
-            content.innerHTML =
-                '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' +
-                progressBar(frac) +
-                etaLine(frac, job.started_at);
-        } else if (job.phase === 'done') {
-            content.innerHTML =
-                '<p><strong>' + job.added + '</strong> newly imported, ' +
-                '<strong>' + job.updated + '</strong> updated, ' +
-                '<strong>' + job.unchanged + '</strong> unchanged, ' +
-                '<strong>' + job.skipped + '</strong> skipped' +
-                (job.unsupported ? ' (' + job.unsupported + ' unsupported file type)' : '') + '.</p>';
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-        } else if (job.phase === 'error') {
-            content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
-            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        function poll() {
+            fetch('{{ base_path }}/manage/import-status')
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () { /* transient network hiccup - next poll will retry */ });
         }
-    }
 
-    function poll() {
-        fetch('{{ base_path }}/manage/import-status')
-            .then(function (r) { return r.json(); })
-            .then(render)
-            .catch(function () { /* transient network hiccup - next poll will retry */ });
-    }
+        var initialJob = {{ import_job | tojson }};
+        render(initialJob);
+        if (initialJob && initialJob.active) {
+            pollTimer = setInterval(poll, 1500);
+        }
+    })();
 
-    var initialJob = {{ import_job | tojson }};
-    render(initialJob);
-    if (initialJob && initialJob.active) {
-        pollTimer = setInterval(poll, 1500);
-    }
+    // --- Garmin sync progress ---
+    (function () {
+        var panel = document.getElementById('garmin-progress-panel');
+        var content = document.getElementById('garmin-progress-content');
+        var pollTimer = null;
+
+        function render(job) {
+            if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+
+            if (job.phase === 'connecting') {
+                content.innerHTML = indeterminateLine('Connecting to Garmin');
+            } else if (job.phase === 'fetching') {
+                content.innerHTML = indeterminateLine('Checking for new activities');
+            } else if (job.phase === 'syncing') {
+                var frac = job.total > 0 ? job.processed / job.total : 0;
+                content.innerHTML = job.total > 0
+                    ? '<p>Syncing activities: ' + job.processed + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine('Syncing');
+            } else if (job.phase === 'matching') {
+                var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
+                content.innerHTML = job.match_total > 0
+                    ? '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine('Computing route matches');
+            } else if (job.phase === 'done') {
+                content.innerHTML =
+                    '<p><strong>' + job.added + '</strong> newly imported, ' +
+                    '<strong>' + job.updated + '</strong> updated.</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            } else if (job.phase === 'error') {
+                content.innerHTML = '<p style="color:#e6194b;">Garmin sync failed: ' + job.error + '</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
+        }
+
+        function poll() {
+            fetch('{{ base_path }}/manage/garmin-sync-status')
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () { /* transient network hiccup - next poll will retry */ });
+        }
+
+        var initialJob = {{ garmin_sync_job | tojson }};
+        render(initialJob);
+        if (initialJob && initialJob.active) {
+            pollTimer = setInterval(poll, 1500);
+        }
+    })();
 })();
 </script>
+
+<style>
+@keyframes matched-runs-indeterminate {
+    0% { margin-left: 0%; }
+    50% { margin-left: 70%; }
+    100% { margin-left: 0%; }
+}
+</style>
 
 {% endblock %}
