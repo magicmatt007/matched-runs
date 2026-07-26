@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9.1
+- Fixed the database import progress bar only appearing in the final
+  second: the 1.9.0 implementation only tracked progress *after* the
+  server had fully received the uploaded file - but for a large file, the
+  upload itself (browser sending it, and the server receiving/spooling it)
+  is usually most of the actual wait, and that part was completely
+  invisible. Switched the upload to use XMLHttpRequest with real upload
+  progress events instead of a plain form POST, so the progress bar now
+  tracks the entire 10-15+ second upload from the start, then hands off to
+  the existing server-side job polling for the post-upload validate/
+  replace/migrate steps. Verified the progress percentage and ETA
+  calculation against a simulated realistic upload (98MB over 12 seconds,
+  sampled every 2 seconds) rather than just the instant-completion case
+  tested in 1.9.0.
+
 ## 1.9.0
 - Database import now runs as a background job with a real progress bar
   too (writing the file in 1MB chunks to report actual byte-level

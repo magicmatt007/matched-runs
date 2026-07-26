@@ -49,9 +49,8 @@
     <div class="row">
         <a class="button" href="{{ base_path }}/manage/export-db">Export database</a>
     </div>
-    <form action="{{ base_path }}/manage/import-db" method="post" enctype="multipart/form-data" class="row" style="margin-top: 10px;"
-          data-confirm="This REPLACES everything currently in this app with the uploaded database. Continue?">
-        <input type="file" name="db_file" accept=".db" required>
+    <form id="db-import-form" action="{{ base_path }}/manage/import-db" method="post" enctype="multipart/form-data" class="row" style="margin-top: 10px;">
+        <input type="file" name="db_file" id="db-import-file" accept=".db" required>
         <button type="submit" class="secondary">Import database</button>
     </form>
     <p class="muted" style="margin-top: 4px;">Importing completely replaces
@@ -325,6 +324,8 @@
     (function () {
         var panel = document.getElementById('db-import-progress-panel');
         var content = document.getElementById('db-import-progress-content');
+        var form = document.getElementById('db-import-form');
+        var fileInput = document.getElementById('db-import-file');
         var pollTimer = null;
 
         function formatBytes(bytes) {
@@ -332,9 +333,8 @@
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
-        function render(job) {
+        function renderServerJob(job) {
             if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
-                panel.style.display = 'none';
                 return;
             }
             panel.style.display = 'block';
@@ -360,17 +360,75 @@
             }
         }
 
-        function poll() {
+        function pollServerStatus() {
             fetch('{{ base_path }}/manage/db-import-status')
                 .then(function (r) { return r.json(); })
-                .then(render)
+                .then(renderServerJob)
                 .catch(function () { /* transient network hiccup - next poll will retry */ });
         }
 
+        // The upload itself (potentially 10s of seconds for a 100MB+
+        // database on slow storage/network) happens entirely within this
+        // browser request, BEFORE the server even starts the background
+        // job the polling above tracks - so that polling alone misses the
+        // biggest part of the wait. This tracks real upload progress via
+        // XMLHttpRequest's upload events instead, then switches over to
+        // polling once the upload itself has actually finished.
+        if (form && fileInput) {
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                if (!fileInput.files.length) return;
+                if (!window.confirm('This REPLACES everything currently in this app with the uploaded database. Continue?')) {
+                    return;
+                }
+
+                var formData = new FormData();
+                formData.append('db_file', fileInput.files[0]);
+
+                var xhr = new XMLHttpRequest();
+                var uploadStartedAt = Date.now() / 1000;
+
+                panel.style.display = 'block';
+                content.innerHTML = '<p>Uploading&hellip;</p>' + progressBar(0);
+
+                xhr.upload.addEventListener('progress', function (evt) {
+                    if (!evt.lengthComputable) {
+                        content.innerHTML = indeterminateLine('Uploading');
+                        return;
+                    }
+                    var frac = evt.loaded / evt.total;
+                    content.innerHTML =
+                        '<p>Uploading: ' + formatBytes(evt.loaded) + ' / ' + formatBytes(evt.total) + '</p>' +
+                        progressBar(frac) +
+                        etaLine(frac, uploadStartedAt);
+                });
+
+                xhr.addEventListener('load', function () {
+                    // Upload finished - the server has (or is about to
+                    // have) started its background job. Switch to polling
+                    // its status for the write/validate/replace/migrate
+                    // phases that happen after the upload completes.
+                    content.innerHTML = indeterminateLine('Processing');
+                    pollServerStatus();
+                    pollTimer = setInterval(pollServerStatus, 1000);
+                });
+
+                xhr.addEventListener('error', function () {
+                    content.innerHTML = '<p style="color:#e6194b;">Upload failed - check your connection and try again.</p>';
+                });
+
+                xhr.open('POST', '{{ base_path }}/manage/import-db', true);
+                xhr.send(formData);
+            });
+        }
+
+        // If a job from an earlier action (e.g. you started an import,
+        // then navigated away and came back) is still running, resume
+        // showing its progress on page load too.
         var initialJob = {{ db_import_job | tojson }};
-        render(initialJob);
+        renderServerJob(initialJob);
         if (initialJob && initialJob.active) {
-            pollTimer = setInterval(poll, 1000);
+            pollTimer = setInterval(pollServerStatus, 1000);
         }
     })();
 })();
