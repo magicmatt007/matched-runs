@@ -117,8 +117,10 @@ def find_cross_source_duplicate(db, points, distance_m, start_time, exclude_sour
     """Look for an already-imported activity from a DIFFERENT source that's
     almost certainly the same real-world activity: start time close together
     and matching route geometry. Returns the existing Activity row, or None.
-    """
-    if start_time is None:
+    Activities with no GPS track (e.g. indoor swims) are never compared
+    this way - there's no route to match, and it's not safe to compare two
+    empty tracks (see tracks_match/_mean_deviation)."""
+    if start_time is None or not points:
         return None
 
     candidates = (
@@ -128,6 +130,7 @@ def find_cross_source_duplicate(db, points, distance_m, start_time, exclude_sour
         .filter(Activity.start_time <= start_time + DUPLICATE_TIME_WINDOW)
         .all()
     )
+    candidates = [c for c in candidates if c.resampled_points]
     if not candidates:
         return None
 
@@ -152,11 +155,11 @@ def merge_duplicate_activities(db):
 
     for i in range(len(activities)):
         a = activities[i]
-        if a.id in to_delete or a.start_time is None:
+        if a.id in to_delete or a.start_time is None or not a.resampled_points:
             continue
         for j in range(i + 1, len(activities)):
             b = activities[j]
-            if b.id in to_delete or b.start_time is None:
+            if b.id in to_delete or b.start_time is None or not b.resampled_points:
                 continue
             if a.source == b.source:
                 continue
@@ -249,7 +252,13 @@ def incremental_rebuild_groups(db, new_activity_ids):
     # Candidate pool: every activity (new or existing) sharing a type with
     # at least one new activity - matching can only happen within the same
     # type, so anything outside these types is correctly never touched.
-    candidates = db.query(Activity).filter(Activity.activity_type.in_(relevant_types)).all()
+    # Activities with no GPS track are excluded entirely - see
+    # rebuild_groups for why (no route to match, and comparing two empty
+    # tracks would risk a divide-by-zero).
+    candidates = [
+        a for a in db.query(Activity).filter(Activity.activity_type.in_(relevant_types)).all()
+        if a.resampled_points
+    ]
     by_id = {a.id: a for a in candidates}
     tracks = {}
     for act in candidates:
@@ -298,9 +307,19 @@ def incremental_rebuild_groups(db, new_activity_ids):
 
 def rebuild_groups(db):
     """Recompute route groups from scratch based on all stored activities."""
-    activities = db.query(Activity).all()
-    if not activities:
+    all_activities = db.query(Activity).all()
+    if not all_activities:
         return
+
+    # Activities with no GPS track (e.g. indoor swims, gym workouts) can
+    # never be route-matched - exclude them from the matching graph
+    # entirely. They just stay ungrouped, same as any activity that didn't
+    # match anything; comparing two empty tracks against each other would
+    # otherwise risk a divide-by-zero (see tracks_match/_mean_deviation).
+    activities = [a for a in all_activities if a.resampled_points]
+    for a in all_activities:
+        if not a.resampled_points:
+            a.group_id = None
 
     # Precompute resampled points + lengths
     data = {}

@@ -36,8 +36,12 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         if ts and start_time is None:
             start_time = ts
 
-    if not points:
-        raise ValueError("No GPS points found in FIT file (indoor activity, or a device without GPS?)")
+    # No raise here for an empty points list - indoor activities (pool
+    # swims, gym sessions, treadmill runs on some devices) genuinely have
+    # no GPS track, but still have valid distance/duration/heart
+    # rate/calories worth importing. They just can't be route-matched,
+    # since there's no route to match against - see matcher.py, which
+    # explicitly excludes routeless activities from all matching/dedup.
 
     distance_m = 0.0
     duration_s = None

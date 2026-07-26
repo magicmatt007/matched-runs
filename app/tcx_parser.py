@@ -17,11 +17,8 @@ def _local(tag):
 
 
 def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
-    # Some Strava TCX exports have stray leading whitespace before the XML
-    # declaration - the XML spec requires <?xml ...?> to be the very first
-    # thing in the document with nothing preceding it at all, so even a
-    # few leading spaces make strict parsers reject the file outright.
-    # Strip anything before the first '<' rather than fail on this.
+    # Some Strava exports have stray leading whitespace before the XML
+    # declaration - see gpx_parser.py for the same fix and why.
     first_tag = data.find(b"<")
     if first_tag > 0:
         data = data[first_tag:]
@@ -85,10 +82,12 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
                 except ValueError:
                     pass
 
-        if lat is None or lon is None:
-            continue
-        points.append((lat, lon))
-        altitudes.append(alt_val)
+        # IMPORTANT: capture time/distance regardless of whether GPS
+        # position is present. Indoor activities (pool swims especially)
+        # often have Time/DistanceMeters per trackpoint but NO Position at
+        # all - gating this behind a valid lat/lon (like the points.append
+        # below correctly does) would silently lose distance/start_time
+        # for every indoor activity.
         if time_val and start_time is None:
             try:
                 start_time = datetime.fromisoformat(time_val.replace("Z", "+00:00"))
@@ -97,12 +96,16 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
         if dist_val is not None:
             last_distance = dist_val
 
-    if not points:
-        raise ValueError("No GPS trackpoints found in TCX file")
+        if lat is None or lon is None:
+            continue
+        points.append((lat, lon))
+        altitudes.append(alt_val)
 
     duration_s = None
     total_lap_time = 0.0
     found_lap_time = False
+    total_lap_distance = 0.0
+    found_lap_distance = False
     total_calories = 0.0
     found_calories = False
     lap_avg_hrs = []
@@ -111,12 +114,28 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     for lap in root.iter():
         if _local(lap.tag) != "Lap":
             continue
+        # Some TCX files only carry a start time as an attribute on <Lap>
+        # itself (no per-trackpoint <Time>, or no trackpoints at all for a
+        # summary-only lap) - use it as a fallback.
+        lap_start_attr = lap.attrib.get("StartTime")
+        if lap_start_attr and start_time is None:
+            try:
+                start_time = datetime.fromisoformat(lap_start_attr.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+
         for child in lap:
             child_tag = _local(child.tag)
             if child_tag == "TotalTimeSeconds" and child.text:
                 try:
                     total_lap_time += float(child.text)
                     found_lap_time = True
+                except ValueError:
+                    pass
+            elif child_tag == "DistanceMeters" and child.text:
+                try:
+                    total_lap_distance += float(child.text)
+                    found_lap_distance = True
                 except ValueError:
                     pass
             elif child_tag == "Calories" and child.text:
@@ -143,6 +162,12 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     if found_lap_time:
         duration_s = total_lap_time
 
+    # Prefer the cumulative distance seen on trackpoints (most granular);
+    # fall back to summed Lap-level totals if no trackpoint ever carried a
+    # DistanceMeters value at all.
+    if last_distance is None and found_lap_distance:
+        last_distance = total_lap_distance
+
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
@@ -160,6 +185,11 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     else:
         avg_heart_rate = None
         max_heart_rate = None
+
+    # No raise here for an empty points list - indoor activities (e.g.
+    # pool swims recorded without Position elements) are still worth
+    # importing without a route. See matcher.py, which explicitly excludes
+    # routeless activities from all matching/dedup.
 
     return {
         "name": fallback_name,

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.7.0
+- Indoor activities with no GPS data (pool swims, gym workouts, treadmill
+  sessions) are now imported instead of being skipped with "No GPS points
+  found" - they just can't be route-matched, for the obvious reason there's
+  no route. Distance, duration, heart rate, cadence, and calories are all
+  still captured normally.
+  - Found and fixed a real bug while building this: a pool swim's
+    TCX/FIT distance and start time were being silently dropped entirely
+    (not just the GPS track) because the code only recorded them for
+    trackpoints that also had a GPS position - which indoor trackpoints
+    never do. Fixed to capture time/distance independently of whether
+    position data is present.
+  - Found and fixed a genuine crash risk: comparing two indoor activities
+    of the same type (e.g. two pool swims) during route matching would
+    divide by zero, since both would have an empty GPS track but a real
+    non-zero recorded distance, bypassing the existing "zero-length track"
+    guard. Activities with no GPS track are now excluded from every
+    matching/dedup code path entirely (rebuild, incremental matching,
+    cross-source duplicate detection, and the manual dedupe tool) - not
+    just handled safely, but never compared at all, since there's no
+    meaningful route comparison to make anyway. Verified this crash
+    actually reproduces before the fix and is fully excluded after.
+  - The activity detail page shows a clear "no GPS track" message instead
+    of an empty/broken map for these activities, and doesn't claim "no
+    matches found yet" (which implies future matching potential that
+    doesn't exist here).
+
 ## 1.6.2
 - Fixed TCX/GPX import failing with "XML or text declaration not at start
   of entity" on some Strava export files - traced to a quirk in Strava's

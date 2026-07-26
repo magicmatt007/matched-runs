@@ -57,8 +57,8 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
                 points.append((p.latitude, p.longitude))
                 elevations.append(p.elevation)
 
-    if not points:
-        raise ValueError("No track points found in GPX file")
+    # No raise here for an empty points list - see fit_parser.py for why
+    # (indoor activities are still worth importing without a route).
 
     name = None
     if gpx.tracks and gpx.tracks[0].name:

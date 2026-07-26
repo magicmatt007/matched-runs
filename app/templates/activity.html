@@ -15,8 +15,10 @@
 </p>
 {% if activity.group_id %}
 <p><a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ activity.group.activities|length - 1 }} other matched run(s) on this route &rarr;</a></p>
-{% else %}
+{% elif activity.full_points %}
 <p class="muted">No matches found yet for this route.</p>
+{% else %}
+<p class="muted">No GPS track, so this activity can't be route-matched.</p>
 {% endif %}
 
 {% if activity.elevation_gain_m is not none or activity.elevation_loss_m is not none
@@ -62,6 +64,7 @@
 </div>
 {% endif %}
 
+{% if activity.full_points %}
 <div id="map" style="height: 480px;"></div>
 
 <script>
@@ -74,5 +77,10 @@ const pts = {{ activity.full_points | tojson }};
 const line = L.polyline(pts, {color: '#e6194b', weight: 4}).addTo(map);
 map.fitBounds(line.getBounds());
 </script>
+{% else %}
+<div class="panel">
+    <p class="muted">No map to show - this activity has no GPS track.</p>
+</div>
+{% endif %}
 
 {% endblock %}
