@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.10.1
+- Fixed a broken app startup introduced in 1.10.0: the `@app.get("/manage")`
+  decorator ended up attached to the wrong function (`_group_activity_counts`,
+  a private helper, not the actual page handler) after removing a line
+  between them - FastAPI tried to register that helper as the route handler
+  itself, and its `db: Session` parameter (no `Depends()`, since it was never
+  meant to be a route) made FastAPI treat it as an invalid request field,
+  crashing the whole app on startup before it could serve anything at all.
+  `py_compile` (what every "PY OK" check in this project relies on) only
+  verifies syntax - it doesn't execute module-level code, so it can't catch
+  a decorator landing on the wrong function; that only shows up when
+  something actually tries to import/run the module, which is exactly what
+  happened here. Added a proper safeguard: a static check (via Python's
+  `ast` module) that walks every `@app.<method>(...)` decorator in the file
+  and confirms it's attached to a sensibly-named handler function, catching
+  this entire class of bug without needing the full dependency stack
+  installed. Confirmed clean with this check before shipping this fix, and
+  will run it going forward.
+
 ## 1.10.0
 - The Import & Sync page no longer shows "Matched routes" or "Unmatched
   activities" at all - good question from testing that surfaced this: it

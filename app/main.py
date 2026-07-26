@@ -324,7 +324,6 @@ templates.env.filters["hms"] = format_duration_hms
 templates.env.filters["pace"] = format_pace
 
 
-@app.get("/manage", response_class=HTMLResponse)
 def _group_activity_counts(db: Session, group_ids=None):
     """Returns {group_id: count} via a single GROUP BY query, instead of
     lazy-loading each group's .activities relationship one at a time (a
@@ -337,6 +336,7 @@ def _group_activity_counts(db: Session, group_ids=None):
     return {gid: count for gid, count in query.all()}
 
 
+@app.get("/manage", response_class=HTMLResponse)
 def manage_page(request: Request, db: Session = Depends(get_db)):
     total_activities = db.query(func.count(Activity.id)).scalar()
     strava_connected = db.query(StravaToken).first() is not None
