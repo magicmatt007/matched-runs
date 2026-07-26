@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.8.0
+- Uploads now run as a real background job instead of blocking the whole
+  request until finished: the Import & Sync page shows a live progress bar
+  with an estimated time remaining, covering both the file-parsing phase
+  and (for large imports) the route-matching phase, which is often the
+  slower part. The import now genuinely continues running server-side if
+  you navigate away or close the browser entirely - previously this was
+  ambiguous at best, since the whole thing lived inside a single blocking
+  request.
+  - Runs on a background thread (not just an async task) specifically so
+    the CPU-bound matching step doesn't freeze the progress-polling
+    endpoint itself while it's computing.
+  - Route matching (`rebuild_groups`) now accepts an optional progress
+    callback, invoked periodically during the O(n^2) comparison loop -
+    verified this reports accurate, monotonically-increasing progress
+    without slowing down the actual matching, using a mock database with
+    60 activities across 20 real-ish routes.
+  - Verified the ETA calculation (rate-based projection from elapsed time
+    and fraction complete) against concrete before/after scenarios rather
+    than just eyeballing the formula.
+  - Fixed a task-lifetime correctness issue while building this: neither
+    this new import task nor the existing Garmin background sync task were
+    keeping a reference to themselves, which Python's own asyncio
+    documentation warns can lead to a task being silently garbage-collected
+    mid-execution. Both now hold a reference until they finish.
+  - Known limitation: since the import holds a long-running database
+    transaction, triggering another write action (Recompute, Garmin sync,
+    dedupe) at the exact same time could occasionally hit a SQLite lock.
+    Not solved with a full cross-route locking system for what should be a
+    rare edge case in a single-user app - just avoid clicking other
+    actions while a large import is actively running.
+
 ## 1.7.0
 - Indoor activities with no GPS data (pool swims, gym workouts, treadmill
   sessions) are now imported instead of being skipped with "No GPS points

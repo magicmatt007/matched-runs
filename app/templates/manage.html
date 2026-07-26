@@ -32,6 +32,11 @@
 </section>
 {% endif %}
 
+<section class="panel" id="import-progress-panel" style="display:none;">
+    <h2>Import progress</h2>
+    <div id="import-progress-content"></div>
+</section>
+
 <section class="panel">
     <h2>Database export / import</h2>
     <p class="muted">Useful for running the initial bulk import and route
@@ -173,5 +178,83 @@
     </div>
 </section>
 {% endif %}
+
+<script>
+(function () {
+    var panel = document.getElementById('import-progress-panel');
+    var content = document.getElementById('import-progress-content');
+    var pollTimer = null;
+
+    function formatDuration(seconds) {
+        if (seconds < 0 || !isFinite(seconds)) return null;
+        if (seconds < 60) return Math.round(seconds) + 's';
+        var m = Math.floor(seconds / 60);
+        var s = Math.round(seconds % 60);
+        return m + 'm ' + s + 's';
+    }
+
+    function progressBar(fraction) {
+        var pct = Math.max(0, Math.min(1, fraction)) * 100;
+        return '<div style="background:#1d212b; border-radius:6px; height:16px; overflow:hidden; margin: 6px 0;">' +
+               '<div style="background:#fc5200; height:100%; width:' + pct + '%; transition: width 0.3s;"></div></div>';
+    }
+
+    function etaLine(fraction, startedAt) {
+        var elapsed = (Date.now() / 1000) - startedAt;
+        if (fraction < 0.02 || elapsed < 2) {
+            return '<p class="muted">Estimating time remaining&hellip;</p>';
+        }
+        var eta = (elapsed / fraction) * (1 - fraction);
+        var formatted = formatDuration(eta);
+        return '<p class="muted">Estimated time remaining: ~' + (formatted || 'unknown') + '</p>';
+    }
+
+    function render(job) {
+        if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = 'block';
+
+        if (job.phase === 'importing') {
+            var frac = job.total > 0 ? job.processed / job.total : 0;
+            content.innerHTML =
+                '<p>Importing files: ' + job.processed + ' / ' + job.total + '</p>' +
+                progressBar(frac) +
+                etaLine(frac, job.started_at);
+        } else if (job.phase === 'matching') {
+            var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
+            content.innerHTML =
+                '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' +
+                progressBar(frac) +
+                etaLine(frac, job.started_at);
+        } else if (job.phase === 'done') {
+            content.innerHTML =
+                '<p><strong>' + job.added + '</strong> newly imported, ' +
+                '<strong>' + job.updated + '</strong> updated, ' +
+                '<strong>' + job.unchanged + '</strong> unchanged, ' +
+                '<strong>' + job.skipped + '</strong> skipped' +
+                (job.unsupported ? ' (' + job.unsupported + ' unsupported file type)' : '') + '.</p>';
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        } else if (job.phase === 'error') {
+            content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+    }
+
+    function poll() {
+        fetch('{{ base_path }}/manage/import-status')
+            .then(function (r) { return r.json(); })
+            .then(render)
+            .catch(function () { /* transient network hiccup - next poll will retry */ });
+    }
+
+    var initialJob = {{ import_job | tojson }};
+    render(initialJob);
+    if (initialJob && initialJob.active) {
+        pollTimer = setInterval(poll, 1500);
+    }
+})();
+</script>
 
 {% endblock %}

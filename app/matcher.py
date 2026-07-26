@@ -305,8 +305,13 @@ def incremental_rebuild_groups(db, new_activity_ids):
     db.commit()
 
 
-def rebuild_groups(db):
-    """Recompute route groups from scratch based on all stored activities."""
+def rebuild_groups(db, progress_callback=None):
+    """Recompute route groups from scratch based on all stored activities.
+
+    progress_callback(done, total), if given, is called periodically (not
+    on every single comparison - that would be needless overhead for
+    what's often a million+ iteration loop) with how many of the O(n^2)
+    pairwise comparisons have been completed so far."""
     all_activities = db.query(Activity).all()
     if not all_activities:
         return
@@ -329,6 +334,11 @@ def rebuild_groups(db):
 
     uf = UnionFind([a.id for a in activities])
 
+    n = len(activities)
+    total_comparisons = n * (n - 1) // 2
+    done_comparisons = 0
+    report_every = max(1, total_comparisons // 200)  # ~200 updates over the whole run
+
     for i in range(len(activities)):
         for j in range(i + 1, len(activities)):
             a, b = activities[i], activities[j]
@@ -338,6 +348,12 @@ def rebuild_groups(db):
             b_pts, b_len = data[b.id]
             if tracks_match(a_pts, a_len, b_pts, b_len):
                 uf.union(a.id, b.id)
+            done_comparisons += 1
+            if progress_callback and done_comparisons % report_every == 0:
+                progress_callback(done_comparisons, total_comparisons)
+
+    if progress_callback:
+        progress_callback(total_comparisons, total_comparisons)
 
     clusters = {}
     for act in activities:

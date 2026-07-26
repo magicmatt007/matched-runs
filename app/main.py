@@ -43,6 +43,161 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 
+# Single global import job state - fine for a personal, single-user app
+# (no need to track multiple concurrent jobs). Runs on a background thread
+# via asyncio.to_thread so it survives the request completing (and the
+# browser navigating away), and so the CPU-bound parsing/matching work
+# doesn't block the event loop from serving other requests - importantly,
+# the progress-polling endpoint itself needs to stay responsive *while*
+# this is running.
+_current_import_job = {"active": False}
+
+# Python's own asyncio.create_task() docs warn that a task can be garbage
+# collected mid-execution if nothing keeps a reference to it - this holds
+# one so that doesn't happen to a multi-minute import or the Garmin sync
+# loop.
+_background_tasks = set()
+
+
+def _spawn_background_task(coro):
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+def _run_import_sync(files_data, name_overrides, job):
+    """The actual (slow, synchronous) import work: parse every file, save
+    each activity, then re-run route matching. Runs on a worker thread via
+    asyncio.to_thread - deliberately kept as plain synchronous code with no
+    async/await, since there's no natural yield point in the middle of
+    parsing a file or running the O(n^2) matching loop anyway."""
+    db = SessionLocal()
+    try:
+        added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
+        seen_extensions = set()
+        added_activities = []
+
+        for filename, content in files_data:
+            job["processed"] += 1
+            lower_name = filename.lower()
+
+            if lower_name.endswith(".gz"):
+                try:
+                    content = gzip.decompress(content)
+                except Exception as e:
+                    logger.warning("Failed to gunzip %s: %s", filename, e)
+                    skipped += 1
+                    continue
+                lower_name = lower_name[:-3]
+
+            ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
+            seen_extensions.add(ext)
+
+            try:
+                if lower_name.endswith(".fit"):
+                    parsed = parse_fit_bytes(content, fallback_name=filename)
+                elif lower_name.endswith(".gpx"):
+                    parsed = parse_gpx_bytes(content, fallback_name=filename)
+                elif lower_name.endswith(".tcx"):
+                    parsed = parse_tcx_bytes(content, fallback_name=filename)
+                else:
+                    unsupported_ext += 1
+                    skipped += 1
+                    continue
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", filename, e)
+                skipped += 1
+                continue
+
+            if lower_name.endswith(".gpx"):
+                source = "gpx"
+            elif lower_name.endswith(".tcx"):
+                source = "tcx"
+            else:
+                source = "fit"
+
+            base_filename = filename.rsplit("/", 1)[-1].strip().lower()
+            final_name = name_overrides.get(base_filename) or parsed["name"]
+
+            status, activity = _save_activity(
+                db, source=source, external_id=filename,
+                name=final_name, points=parsed["points"],
+                distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
+                start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
+                elevation_gain_m=parsed.get("elevation_gain_m"),
+                elevation_loss_m=parsed.get("elevation_loss_m"),
+                avg_heart_rate=parsed.get("avg_heart_rate"),
+                max_heart_rate=parsed.get("max_heart_rate"),
+                avg_cadence=parsed.get("avg_cadence"),
+                calories=parsed.get("calories"),
+            )
+            if status == "added":
+                added += 1
+                added_activities.append(activity)
+            elif status == "updated":
+                updated += 1
+            else:
+                unchanged += 1
+
+        # Backfill names on already-imported activities too, in case
+        # activities.csv was uploaded separately from (before or after) the
+        # actual activity files.
+        if name_overrides:
+            for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
+                base = (act.external_id or "").rsplit("/", 1)[-1].strip().lower()
+                better_name = name_overrides.get(base)
+                if better_name and act.name != better_name:
+                    act.name = better_name
+                    updated += 1
+
+        db.flush()
+        added_ids = [a.id for a in added_activities]
+        db.commit()
+
+        job["phase"] = "matching"
+        job["match_done"] = 0
+        job["match_total"] = 0
+
+        def report_match_progress(done, total):
+            job["match_done"] = done
+            job["match_total"] = total
+
+        if updated:
+            # A metadata-only update (name/type backfill) doesn't need
+            # re-matching, but a cross-source-duplicate merge DOES change an
+            # activity's geometry - play it safe with a full rebuild
+            # whenever any update happened at all.
+            rebuild_groups(db, progress_callback=report_match_progress)
+        elif added_ids:
+            if len(added_ids) > 20:
+                # A big bulk import has enough new activities that
+                # comparing each one against everything isn't meaningfully
+                # cheaper than a full rebuild.
+                rebuild_groups(db, progress_callback=report_match_progress)
+            else:
+                incremental_rebuild_groups(db, added_ids)
+
+        logger.info(
+            "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
+            added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
+        )
+
+        job["phase"] = "done"
+        job["added"] = added
+        job["updated"] = updated
+        job["unchanged"] = unchanged
+        job["skipped"] = skipped
+        job["unsupported"] = unsupported_ext
+    except Exception as e:
+        logger.exception("Import job failed")
+        job["phase"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["active"] = False
+        db.close()
+
+
 def ingress_prefix(request: Request) -> str:
     """Home Assistant's ingress proxy serves this app under a dynamic
     per-session path (e.g. /api/hassio_ingress/<token>), passed via this
@@ -211,11 +366,29 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "garmin_has_session": garmin_client.has_saved_session(),
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
         "db_imported": request.query_params.get("db_imported") == "1",
+        "import_job": _current_import_job,
     })
 
 
+@app.get("/manage/import-status")
+def import_status():
+    """Polled by the Import & Sync page's progress bar - plain JSON, no
+    template needed."""
+    return _current_import_job
+
+
 @app.post("/upload")
-async def upload_gpx(request: Request, db: Session = Depends(get_db)):
+async def upload_gpx(request: Request):
+    if _current_import_job.get("active"):
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>An import is already running. Check the Import &amp; Sync "
+            "page for its progress, and wait for it to finish before "
+            "starting another.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=409,
+        )
+
     # FastAPI's default File(...) injection caps multipart requests at 1000
     # files/fields as a DoS safeguard. Years of activity history easily
     # exceeds that, so parse the form manually with a much higher ceiling -
@@ -227,143 +400,51 @@ async def upload_gpx(request: Request, db: Session = Depends(get_db)):
         len(form.keys()), len(files), [type(x).__name__ for x in files[:5]],
     )
 
-    added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
-    seen_extensions = set()
-    added_activities = []
-
-    # Strava's bulk export includes a top-level activities.csv mapping each
-    # exported file to the title you actually gave it on Strava. If it's
-    # part of this upload, pull it out first and use it to name-override
-    # anything we're about to import (and anything already imported before).
+    # Read every file's bytes now, while the request/upload stream is still
+    # available - the actual (slow) parsing happens afterward on a
+    # background thread, by which point these UploadFile objects can no
+    # longer be read from.
     name_overrides = {}
-    activity_files = []
+    files_data = []  # list of (filename, content_bytes)
     for f in files:
-        if hasattr(f, "filename") and (f.filename or "").lower().endswith("activities.csv"):
-            try:
-                content = await f.read()
-                found = parse_strava_activities_csv(content)
-                name_overrides.update(found)
-                logger.info("Loaded %d titles from %s", len(found), f.filename)
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", f.filename, e)
-        else:
-            activity_files.append(f)
-    files = activity_files
-
-    for f in files:
-        # Duck-type instead of isinstance(f, UploadFile): depending on
-        # Starlette/FastAPI version, objects returned by request.form() may
-        # not be the exact same class object as the imported UploadFile,
-        # which would silently make isinstance() reject every file.
         if not (hasattr(f, "filename") and hasattr(f, "read")):
             logger.warning("Skipping non-file form field under 'files': %r", f)
             continue
+        filename = f.filename or ""
         content = await f.read()
-        lower_name = (f.filename or "").lower()
-
-        # Strava's bulk export gzips some activity files (e.g. "123.gpx.gz").
-        if lower_name.endswith(".gz"):
+        if filename.lower().endswith("activities.csv"):
             try:
-                content = gzip.decompress(content)
+                found = parse_strava_activities_csv(content)
+                name_overrides.update(found)
+                logger.info("Loaded %d titles from %s", len(found), filename)
             except Exception as e:
-                logger.warning("Failed to gunzip %s: %s", f.filename, e)
-                skipped += 1
-                continue
-            lower_name = lower_name[:-3]  # strip trailing ".gz"
-
-        ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
-        seen_extensions.add(ext)
-
-        try:
-            if lower_name.endswith(".fit"):
-                parsed = parse_fit_bytes(content, fallback_name=f.filename)
-            elif lower_name.endswith(".gpx"):
-                parsed = parse_gpx_bytes(content, fallback_name=f.filename)
-            elif lower_name.endswith(".tcx"):
-                parsed = parse_tcx_bytes(content, fallback_name=f.filename)
-            else:
-                unsupported_ext += 1
-                skipped += 1
-                continue
-        except Exception as e:
-            # Corrupt file, indoor activity with no GPS, unsupported FIT
-            # message layout, etc - skip it and keep processing the rest of
-            # the batch rather than aborting the whole import.
-            logger.warning("Failed to parse %s: %s", f.filename, e)
-            skipped += 1
-            continue
-
-        if lower_name.endswith(".gpx"):
-            source = "gpx"
-        elif lower_name.endswith(".tcx"):
-            source = "tcx"
+                logger.warning("Failed to parse %s: %s", filename, e)
         else:
-            source = "fit"
+            files_data.append((filename, content))
 
-        base_filename = (f.filename or "").rsplit("/", 1)[-1].strip().lower()
-        final_name = name_overrides.get(base_filename) or parsed["name"]
+    if not files_data:
+        return local_redirect(request, "/manage?imported=0&updated=0&skipped=0&duplicates=0&unsupported=0")
 
-        status, activity = _save_activity(
-            db, source=source, external_id=f.filename,
-            name=final_name, points=parsed["points"],
-            distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
-            start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
-            elevation_gain_m=parsed.get("elevation_gain_m"),
-            elevation_loss_m=parsed.get("elevation_loss_m"),
-            avg_heart_rate=parsed.get("avg_heart_rate"),
-            max_heart_rate=parsed.get("max_heart_rate"),
-            avg_cadence=parsed.get("avg_cadence"),
-            calories=parsed.get("calories"),
-        )
-        if status == "added":
-            added += 1
-            added_activities.append(activity)
-        elif status == "updated":
-            updated += 1
-        else:
-            unchanged += 1
+    _current_import_job.clear()
+    _current_import_job.update({
+        "active": True,
+        "phase": "importing",
+        "processed": 0,
+        "total": len(files_data),
+        "match_done": 0,
+        "match_total": 0,
+        "started_at": time.time(),
+        "added": 0, "updated": 0, "unchanged": 0, "skipped": 0, "unsupported": 0,
+        "error": None,
+    })
 
-    # Backfill names on already-imported activities too, in case
-    # activities.csv was uploaded separately from (before or after) the
-    # actual activity files.
-    if name_overrides:
-        for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
-            base = (act.external_id or "").rsplit("/", 1)[-1].strip().lower()
-            better_name = name_overrides.get(base)
-            if better_name and act.name != better_name:
-                act.name = better_name
-                updated += 1
+    # Runs on a worker thread (see _run_import_sync's docstring for why),
+    # as a fire-and-forget task the request doesn't wait on - so it keeps
+    # running to completion regardless of whether the browser navigates
+    # away or even closes entirely.
+    _spawn_background_task(asyncio.to_thread(_run_import_sync, files_data, name_overrides, _current_import_job))
 
-    db.flush()  # assign primary keys to newly added activities before reading their ids
-    added_ids = [a.id for a in added_activities]
-    db.commit()
-
-    if updated:
-        # A metadata-only update (name/type backfill) doesn't need
-        # re-matching, but a cross-source-duplicate merge DOES change an
-        # activity's geometry - since upload_gpx can't tell those apart
-        # here without extra bookkeeping, play it safe with a full rebuild
-        # whenever any update happened at all.
-        rebuild_groups(db)
-    elif added_ids:
-        if len(added_ids) > 20:
-            # A big bulk import (e.g. years of history in one folder
-            # upload) has enough new activities that comparing each one
-            # against everything isn't meaningfully cheaper than a full
-            # rebuild - just do the simple, obviously-correct thing.
-            rebuild_groups(db)
-        else:
-            incremental_rebuild_groups(db, added_ids)
-
-    logger.info(
-        "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
-        added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
-    )
-    return local_redirect(
-        request,
-        f"/manage?imported={added}&updated={updated}&skipped={skipped}"
-        f"&duplicates={unchanged}&unsupported={unsupported_ext}",
-    )
+    return local_redirect(request, "/manage")
 
 
 PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
@@ -1229,4 +1310,4 @@ async def _start_background_tasks():
             "Garmin auto-sync enabled, running every %d minutes.",
             GARMIN_SYNC_INTERVAL_MINUTES,
         )
-        asyncio.create_task(_garmin_background_sync_loop())
+        _spawn_background_task(_garmin_background_sync_loop())
