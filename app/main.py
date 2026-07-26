@@ -4,16 +4,17 @@ import os
 import gzip
 import logging
 import asyncio
+import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from fastapi import FastAPI, Request, UploadFile, Depends, Form
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi import FastAPI, Request, UploadFile, Depends, Form, File
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.database import Base, engine, get_db, run_migrations, SessionLocal
+from app.database import Base, engine, get_db, run_migrations, SessionLocal, DB_PATH
 from app.models import Activity, RouteGroup, StravaToken, GarminSyncState
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
@@ -189,6 +190,7 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "garmin_configured": garmin_client.is_configured(),
         "garmin_has_session": garmin_client.has_saved_session(),
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
+        "db_imported": request.query_params.get("db_imported") == "1",
     })
 
 
@@ -567,12 +569,14 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
 
 # ---------------- Training log (period-based view, grouped by month for 1y) ----------------
 
-PERIOD_DAYS = {"7d": 7, "4w": 28, "1y": 365}
+PERIOD_DAYS = {"7d": 7, "4w": 28}  # 1y is handled separately - see _year_window
 
 
 def _period_window(period: str, offset: int):
     """Returns (window_start, window_end, span_days) for a rolling period
-    ending `offset` periods ago (offset=0 -> ending today)."""
+    ending `offset` periods ago (offset=0 -> ending today). Used for 7d/4w
+    only - the 1y view uses _year_window instead (calendar-month aligned,
+    not a rolling day count)."""
     days = PERIOD_DAYS.get(period, 7)
     today = datetime.utcnow().date()
     end_date = today - timedelta(days=offset * days)
@@ -582,10 +586,35 @@ def _period_window(period: str, offset: int):
     return window_start, window_end, days
 
 
+def _add_months(dt: datetime, delta_months: int) -> datetime:
+    """Add (or subtract) whole calendar months, clamped to day=1 - only
+    ever used here for month boundaries, never a specific day-of-month."""
+    total = dt.year * 12 + (dt.month - 1) + delta_months
+    year = total // 12
+    month = total % 12 + 1
+    return dt.replace(year=year, month=month, day=1)
+
+
+def _year_window(offset: int):
+    """Trailing 12 *complete* calendar months, not a rolling 365-day
+    window - e.g. on any day in July 2026, offset=0 means July 2025 through
+    June 2026 (the current, still-in-progress month is deliberately
+    excluded). offset=1 shifts back another 12 months, etc."""
+    today = datetime.utcnow().date()
+    this_month_start = datetime(today.year, today.month, 1)
+    last_complete_month_start = _add_months(this_month_start, -1)
+    end_month_start = _add_months(last_complete_month_start, -12 * offset)
+    start_month_start = _add_months(end_month_start, -11)
+    window_start = start_month_start
+    window_end = _add_months(end_month_start, 1) - timedelta(seconds=1)
+    span_days = (window_end - window_start).days + 1
+    return window_start, window_end, span_days
+
+
 @app.get("/log", response_class=HTMLResponse)
 def training_log(request: Request, type: str = None, period: str = "7d",
                   offset: int = 0, month: str = None, db: Session = Depends(get_db)):
-    if period not in PERIOD_DAYS:
+    if period not in ("7d", "4w", "1y"):
         period = "7d"
     if offset < 0:
         offset = 0
@@ -593,8 +622,11 @@ def training_log(request: Request, type: str = None, period: str = "7d",
     types = sorted({
         row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
     })
-    if not type and types:
-        type = types[0]
+    if not type:
+        if "Running" in types:
+            type = "Running"
+        elif types:
+            type = types[0]
 
     base_query = db.query(Activity)
     if type:
@@ -614,11 +646,7 @@ def training_log(request: Request, type: str = None, period: str = "7d",
 
     if drill_month:
         month_start = drill_month.replace(day=1)
-        month_next = (
-            month_start.replace(year=month_start.year + 1, month=1)
-            if month_start.month == 12
-            else month_start.replace(month=month_start.month + 1)
-        )
+        month_next = _add_months(month_start, 1)
         window_start = month_start
         window_end = month_next - timedelta(seconds=1)
         span_days = (month_next - month_start).days
@@ -627,9 +655,12 @@ def training_log(request: Request, type: str = None, period: str = "7d",
         if month_next.date() <= today:
             next_month = month_next.strftime("%Y-%m")
         mode = "list"
+    elif period == "1y":
+        window_start, window_end, span_days = _year_window(offset)
+        mode = "monthly"
     else:
         window_start, window_end, span_days = _period_window(period, offset)
-        mode = "monthly" if period == "1y" else "list"
+        mode = "list"
 
     activities = (
         base_query.filter(Activity.start_time >= window_start, Activity.start_time <= window_end)
@@ -650,7 +681,39 @@ def training_log(request: Request, type: str = None, period: str = "7d",
             })
             g["count"] += 1
             g["distance_m"] += a.distance_m or 0
+        # Make sure every month in the 12-month window appears (even ones
+        # with zero activities), so the chart below has a complete axis.
+        cursor = window_start
+        while cursor <= window_end:
+            key = cursor.strftime("%Y-%m")
+            groups.setdefault(key, {
+                "month": key, "label": cursor.strftime("%B %Y"), "count": 0, "distance_m": 0.0,
+            })
+            cursor = _add_months(cursor, 1)
         month_groups = sorted(groups.values(), key=lambda g: g["month"], reverse=True)
+
+    # Chart data: always chronological (oldest to newest), independent of
+    # the table/card display order above. Monthly buckets for the 1y
+    # overview, daily buckets otherwise (7d, 4w, and month drill-down all
+    # get a sensible day-by-day axis this way, without special-casing
+    # drill-down separately).
+    if mode == "monthly":
+        chart_data = [
+            {"label": g["label"], "distance_m": g["distance_m"]}
+            for g in sorted(month_groups, key=lambda g: g["month"])
+        ]
+    else:
+        by_day = {}
+        for a in activities:
+            if a.start_time:
+                d = a.start_time.date()
+                by_day[d] = by_day.get(d, 0.0) + (a.distance_m or 0)
+        chart_data = []
+        cursor = window_start.date()
+        end_date = window_end.date()
+        while cursor <= end_date:
+            chart_data.append({"label": cursor.strftime("%b %d"), "distance_m": by_day.get(cursor, 0.0)})
+            cursor += timedelta(days=1)
 
     total_distance_km = sum(a.distance_m or 0 for a in activities) / 1000.0
     avg_weekly_km = (total_distance_km / span_days * 7) if span_days else 0.0
@@ -665,6 +728,7 @@ def training_log(request: Request, type: str = None, period: str = "7d",
         "mode": mode,
         "activities": activities,
         "month_groups": month_groups,
+        "chart_data": chart_data,
         "current_month": current_month,
         "prev_month": prev_month,
         "next_month": next_month,
@@ -737,6 +801,84 @@ def dedupe_route(request: Request, db: Session = Depends(get_db)):
 def rebuild(request: Request, db: Session = Depends(get_db)):
     rebuild_groups(db)
     return local_redirect(request, "/manage")
+
+
+# ---------------- Database export/import ----------------
+# Handy for running the (potentially slow, especially on something like a
+# Raspberry Pi) initial bulk import and route matching on a more powerful
+# machine, then moving the already-populated database over to wherever
+# you'll actually run the app day to day.
+
+@app.get("/manage/export-db")
+def export_db():
+    # Use SQLite's own backup API rather than just handing back the raw
+    # file - a plain file copy could catch the database mid-write (or miss
+    # data sitting in a separate -wal file if write-ahead logging is on),
+    # producing a corrupt or incomplete export. The backup API produces a
+    # consistent snapshot regardless.
+    export_path = "/tmp/matched-runs-export.db"
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(export_path)
+    src.backup(dst)
+    dst.close()
+    src.close()
+    return FileResponse(
+        export_path,
+        filename="matched-runs-export.db",
+        media_type="application/octet-stream",
+    )
+
+
+@app.post("/manage/import-db")
+async def import_db(request: Request, db_file: UploadFile = File(...)):
+    content = await db_file.read()
+
+    if not content.startswith(b"SQLite format 3\x00"):
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>That doesn't look like a valid SQLite database file.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=400,
+        )
+
+    tmp_path = DB_PATH + ".importing"
+    with open(tmp_path, "wb") as f:
+        f.write(content)
+
+    try:
+        check = sqlite3.connect(tmp_path)
+        tables = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        check.close()
+    except Exception as e:
+        os.remove(tmp_path)
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            f"<p>Couldn't read that file as a SQLite database: {e}</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=400,
+        )
+
+    if "activities" not in tables:
+        os.remove(tmp_path)
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>That SQLite file doesn't look like a Matched Runs database "
+            "(missing the expected tables).</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=400,
+        )
+
+    # Close existing connections before swapping the file out from under
+    # them - SQLAlchemy will open fresh ones against the new file on the
+    # next query.
+    engine.dispose()
+    os.replace(tmp_path, DB_PATH)
+    # In case the imported database predates a schema change (e.g. it came
+    # from a slightly older version of the app), backfill any new columns.
+    run_migrations()
+
+    logger.info("Database imported from upload, replacing the previous database entirely.")
+    return local_redirect(request, "/manage?db_imported=1")
 
 
 # ---------------- Strava OAuth + sync ----------------

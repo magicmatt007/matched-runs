@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.0
+- Training Log: defaults to "Running" when available; the 1-year view now
+  shows the trailing 12 *complete* calendar months (e.g. on any day in
+  July, that's July last year through June this year) instead of a rolling
+  365-day window, so it always lines up with clean month boundaries.
+  Verified the month-boundary math directly, including the January/December
+  year-rollover edge cases.
+- Added a distance chart to the Training Log: daily bars for the 7-day/
+  4-week views and month drill-down, monthly bars for the 1-year overview.
+  Hand-rolled SVG, same approach as the pace chart on route pages.
+- New database export/import on the Import & Sync page - useful for doing
+  the initial bulk import and route matching on a faster machine, then
+  moving the populated database to wherever you actually run the app.
+  Export uses SQLite's own backup API (not a raw file copy) to avoid
+  catching the database mid-write; import validates the uploaded file is
+  actually a SQLite database with the expected tables before replacing
+  anything, and re-runs schema migrations afterward in case the imported
+  database is from an older app version. The confirmation dialog before
+  replacing your data is wired through an external script rather than an
+  inline handler, since inline JS/handlers can be silently blocked under
+  Home Assistant's ingress - already learned that lesson with the mobile
+  layout fix in 1.2.2, applied it here proactively this time.
+
 ## 1.4.0
 - New "Training Log" page (linked from the header): pick an activity type,
   choose a period (last 7 days, last 4 weeks, or last year), and navigate

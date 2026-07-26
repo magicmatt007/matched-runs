@@ -49,6 +49,11 @@
 <p><a href="{{ base_path }}/log?type={{ selected_type }}&period=1y">&larr; Back to monthly overview</a></p>
 {% endif %}
 
+<div class="panel">
+    <h3 style="margin-top:0;">Distance</h3>
+    <div id="distance-chart"></div>
+</div>
+
 <div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">
     <div class="panel" style="flex: 1; min-width: 140px; text-align: center;">
         <div class="muted">Total distance</div>
@@ -105,6 +110,61 @@
     </table>
     </div>
 {% endif %}
+
+<script>
+(function () {
+    var data = {{ chart_data | tojson }};
+    var container = document.getElementById('distance-chart');
+    if (!container) return;
+    if (data.length === 0 || data.every(function (d) { return d.distance_m === 0; })) {
+        container.innerHTML = '<p class="muted">No distance data for this period.</p>';
+        return;
+    }
+
+    var width = 800, height = 220;
+    var padding = { top: 16, right: 16, bottom: 32, left: 56 };
+    var plotW = width - padding.left - padding.right;
+    var plotH = height - padding.top - padding.bottom;
+
+    var maxDist = Math.max.apply(null, data.map(function (d) { return d.distance_m; })) || 1;
+    var barSlot = plotW / data.length;
+
+    function yFor(distM) {
+        return padding.top + plotH - (distM / maxDist) * plotH;
+    }
+    function formatKm(m) {
+        return (m / 1000).toFixed(1) + ' km';
+    }
+
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%; height:220px;">';
+
+    var tickCount = 4;
+    for (var t = 0; t <= tickCount; t++) {
+        var val = maxDist * t / tickCount;
+        var y = yFor(val);
+        svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
+        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="#8b8f9a">' + formatKm(val) + '</text>';
+    }
+
+    var labelStep = Math.ceil(data.length / 14) || 1;
+
+    data.forEach(function (d, i) {
+        var x = padding.left + i * barSlot;
+        var y = yFor(d.distance_m);
+        var barH = (padding.top + plotH) - y;
+        var w = Math.max(barSlot * 0.7, 2);
+        var xOffset = x + (barSlot - w) / 2;
+        svg += '<rect x="' + xOffset + '" y="' + y + '" width="' + w + '" height="' + barH + '" fill="#fc5200">' +
+               '<title>' + d.label + ' - ' + formatKm(d.distance_m) + '</title></rect>';
+        if (i % labelStep === 0) {
+            svg += '<text x="' + (x + barSlot / 2) + '" y="' + (height - padding.bottom + 14) + '" text-anchor="middle" font-size="10" fill="#8b8f9a">' + d.label + '</text>';
+        }
+    });
+
+    svg += '</svg>';
+    container.innerHTML = svg;
+})();
+</script>
 
 {% endif %}
 

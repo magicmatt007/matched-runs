@@ -25,6 +25,32 @@
 </section>
 {% endif %}
 
+{% if db_imported %}
+<section class="panel" style="border-color: #3cb44b;">
+    <h2>Database imported</h2>
+    <p>The database was replaced successfully with the uploaded file.</p>
+</section>
+{% endif %}
+
+<section class="panel">
+    <h2>Database export / import</h2>
+    <p class="muted">Useful for running the initial bulk import and route
+        matching on a faster machine (e.g. a desktop instead of a Raspberry
+        Pi), then moving the already-populated database over to wherever
+        you actually run the app day to day.</p>
+    <div class="row">
+        <a class="button" href="{{ base_path }}/manage/export-db">Export database</a>
+    </div>
+    <form action="{{ base_path }}/manage/import-db" method="post" enctype="multipart/form-data" class="row" style="margin-top: 10px;"
+          data-confirm="This REPLACES everything currently in this app with the uploaded database. Continue?">
+        <input type="file" name="db_file" accept=".db" required>
+        <button type="submit" class="secondary">Import database</button>
+    </form>
+    <p class="muted" style="margin-top: 4px;">Importing completely replaces
+        all current data - there's no merge. Make sure that's really what
+        you want before confirming.</p>
+</section>
+
 <section class="panel">
     <h2>Import activities</h2>
     <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row">
