@@ -129,7 +129,10 @@
     // the labels were unreadable on mobile specifically.
     var width = container.clientWidth || 800;
     var height = 220;
-    var padding = { top: 16, right: 16, bottom: 32, left: 60 };
+    // More bottom padding than before - the x-axis labels are rotated 90
+    // degrees below (see the loop further down), so they now need vertical
+    // room roughly equal to their text length instead of their height.
+    var padding = { top: 16, right: 16, bottom: 70, left: 60 };
     var plotW = width - padding.left - padding.right;
     var plotH = height - padding.top - padding.bottom;
 
@@ -153,10 +156,11 @@
         svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="13" fill="#8b8f9a">' + formatKm(val) + '</text>';
     }
 
-    // How many x-axis labels actually fit without overlapping depends on
-    // real available width, not a fixed count - a phone screen can fit
-    // far fewer ~45px-wide date labels than a desktop can.
-    var pxPerLabel = 45;
+    // Rotated 90 degrees, each label only needs roughly its own text-height
+    // worth of horizontal space (not its full text width), so far more
+    // labels fit before any need to be skipped - especially valuable on a
+    // narrow phone screen, which is exactly where skipping was worst.
+    var pxPerLabel = 22;
     var maxLabels = Math.max(1, Math.floor(plotW / pxPerLabel));
     var labelStep = Math.ceil(data.length / maxLabels) || 1;
 
@@ -169,7 +173,12 @@
         svg += '<rect x="' + xOffset + '" y="' + y + '" width="' + w + '" height="' + barH + '" fill="#fc5200">' +
                '<title>' + d.label + ' - ' + formatKm(d.distance_m) + '</title></rect>';
         if (i % labelStep === 0) {
-            svg += '<text x="' + (x + barSlot / 2) + '" y="' + (height - padding.bottom + 16) + '" text-anchor="middle" font-size="12" fill="#8b8f9a">' + d.label + '</text>';
+            var lx = x + barSlot / 2;
+            var ly = height - padding.bottom + 6;
+            // text-anchor="end" + rotate(-90, lx, ly) makes the label read
+            // bottom-to-top, extending upward from just below the axis -
+            // the standard way to mount a rotated axis label at a tick.
+            svg += '<text x="' + lx + '" y="' + ly + '" text-anchor="end" font-size="12" fill="#8b8f9a" transform="rotate(-90 ' + lx + ' ' + ly + ')">' + d.label + '</text>';
         }
     });
 

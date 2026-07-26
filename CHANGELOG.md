@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.3
+- Training Log's distance chart now rotates its x-axis date labels 90
+  degrees instead of skipping most of them on narrow screens - rotated
+  text only needs roughly its own height worth of horizontal space instead
+  of its full text width, so far more labels fit before any need to be
+  dropped. Verified the improvement directly: a 4-week (28-day) view on a
+  typical phone width now shows ~36% of labels instead of ~21% before, and
+  a 1-year view's 12 month labels now all fit even on small phones
+  (previously only ~6 of 12 would fit).
+
 ## 1.10.2
 - Fixed tiny, hard-to-read chart labels on mobile (Training Log's distance
   chart, and the pace-over-time chart on each route's page). Root cause:
