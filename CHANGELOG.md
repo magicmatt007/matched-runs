@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.0
+- Database import now runs as a background job with a real progress bar
+  too (writing the file in 1MB chunks to report actual byte-level
+  progress, then quick indeterminate phases for validating/replacing/
+  migrating), same reasoning as the file upload and Garmin sync progress
+  from 1.8.0 - useful since a 100MB+ database can genuinely take a while to
+  write on slow storage. Removed the old static "database imported" banner
+  in favor of this job-based one.
+- Activity detail pages now show Previous/Next buttons when reached from a
+  list (the home "All Activities" page, a matched route's page, or the
+  Training Log), navigating within that exact same sort/filter/context -
+  not some arbitrary global order. Clicking Next repeatedly keeps working
+  correctly since the context carries forward on the buttons themselves,
+  not just the initial link into the activity. No buttons shown when an
+  activity is reached without list context (e.g. a direct bookmark).
+  Verified the underlying prev/next index logic against several edge cases
+  (first item, last item, single-item list, activity no longer in the
+  list) before wiring it up.
+
 ## 1.8.1
 - Fixed activities.csv-only uploads (re-uploading just the CSV, without the
   activity files, to backfill names after the fact) doing nothing despite

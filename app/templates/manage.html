@@ -25,13 +25,6 @@
 </section>
 {% endif %}
 
-{% if db_imported %}
-<section class="panel" style="border-color: #3cb44b;">
-    <h2>Database imported</h2>
-    <p>The database was replaced successfully with the uploaded file.</p>
-</section>
-{% endif %}
-
 <section class="panel" id="import-progress-panel" style="display:none;">
     <h2>Import progress</h2>
     <div id="import-progress-content"></div>
@@ -64,6 +57,11 @@
     <p class="muted" style="margin-top: 4px;">Importing completely replaces
         all current data - there's no merge. Make sure that's really what
         you want before confirming.</p>
+</section>
+
+<section class="panel" id="db-import-progress-panel" style="display:none;">
+    <h2>Database import progress</h2>
+    <div id="db-import-progress-content"></div>
 </section>
 
 <section class="panel">
@@ -320,6 +318,59 @@
         render(initialJob);
         if (initialJob && initialJob.active) {
             pollTimer = setInterval(poll, 1500);
+        }
+    })();
+
+    // --- Database import progress ---
+    (function () {
+        var panel = document.getElementById('db-import-progress-panel');
+        var content = document.getElementById('db-import-progress-content');
+        var pollTimer = null;
+
+        function formatBytes(bytes) {
+            if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function render(job) {
+            if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+
+            if (job.phase === 'writing') {
+                var frac = job.total > 0 ? job.processed / job.total : 0;
+                content.innerHTML =
+                    '<p>Writing database: ' + formatBytes(job.processed) + ' / ' + formatBytes(job.total) + '</p>' +
+                    progressBar(frac) +
+                    etaLine(frac, job.started_at);
+            } else if (job.phase === 'validating') {
+                content.innerHTML = indeterminateLine('Validating the uploaded file');
+            } else if (job.phase === 'replacing') {
+                content.innerHTML = indeterminateLine('Replacing the database');
+            } else if (job.phase === 'migrating') {
+                content.innerHTML = indeterminateLine('Updating database schema if needed');
+            } else if (job.phase === 'done') {
+                content.innerHTML = '<p>Database imported successfully - everything currently in the app was replaced by the uploaded file.</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            } else if (job.phase === 'error') {
+                content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
+        }
+
+        function poll() {
+            fetch('{{ base_path }}/manage/db-import-status')
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () { /* transient network hiccup - next poll will retry */ });
+        }
+
+        var initialJob = {{ db_import_job | tojson }};
+        render(initialJob);
+        if (initialJob && initialJob.active) {
+            pollTimer = setInterval(poll, 1000);
         }
     })();
 })();

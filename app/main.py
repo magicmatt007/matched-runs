@@ -365,9 +365,9 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "garmin_configured": garmin_client.is_configured(),
         "garmin_has_session": garmin_client.has_saved_session(),
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
-        "db_imported": request.query_params.get("db_imported") == "1",
         "import_job": _current_import_job,
         "garmin_sync_job": _current_garmin_sync_job,
+        "db_import_job": _current_db_import_job,
     })
 
 
@@ -669,10 +669,95 @@ def group_detail(group_id: int, request: Request, page: int = 1,
     })
 
 
+def _ordered_activity_ids_for_context(db: Session, request: Request):
+    """Reconstructs the same ordered list of activity ids that whichever
+    list page linked to this activity was showing, so Prev/Next navigation
+    reflects the exact sort/filter/context that was active - not some
+    arbitrary global order. Returns None if the request has no recognized
+    list context (e.g. reached directly via a bookmark)."""
+    list_type = request.query_params.get("list")
+
+    if list_type == "activities":
+        query = db.query(Activity.id)
+        type_filter = request.query_params.get("type")
+        if type_filter:
+            query = query.filter(Activity.activity_type == type_filter)
+        query, _, _ = apply_sort_and_filters(query, request)
+        return [row[0] for row in query.all()]
+
+    if list_type == "group":
+        try:
+            group_id = int(request.query_params.get("group_id", ""))
+        except ValueError:
+            return None
+        query = db.query(Activity.id).filter(Activity.group_id == group_id)
+        query, _, _ = apply_sort_and_filters(query, request)
+        return [row[0] for row in query.all()]
+
+    if list_type == "log":
+        log_type = request.query_params.get("log_type")
+        period = request.query_params.get("period", "7d")
+        if period not in ("7d", "4w", "1y"):
+            period = "7d"
+        try:
+            offset = int(request.query_params.get("offset", "0"))
+        except ValueError:
+            offset = 0
+        month = request.query_params.get("month")
+
+        query = db.query(Activity)
+        if log_type:
+            query = query.filter(Activity.activity_type == log_type)
+
+        drill_month = None
+        if period == "1y" and month:
+            try:
+                drill_month = datetime.strptime(month, "%Y-%m")
+            except ValueError:
+                drill_month = None
+
+        if drill_month:
+            month_start = drill_month.replace(day=1)
+            month_next = _add_months(month_start, 1)
+            window_start, window_end = month_start, month_next - timedelta(seconds=1)
+        elif period == "1y":
+            window_start, window_end, _ = _year_window(offset)
+        else:
+            window_start, window_end, _ = _period_window(period, offset)
+
+        rows = (
+            query.filter(Activity.start_time >= window_start, Activity.start_time <= window_end)
+            .order_by(Activity.start_time.desc())
+            .with_entities(Activity.id)
+            .all()
+        )
+        return [row[0] for row in rows]
+
+    return None
+
+
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
 def activity_detail(activity_id: int, request: Request, db: Session = Depends(get_db)):
     activity = db.query(Activity).filter_by(id=activity_id).first()
-    return templates.TemplateResponse("activity.html", {"request": request, "activity": activity})
+
+    prev_id = next_id = None
+    list_ids = _ordered_activity_ids_for_context(db, request)
+    if list_ids and activity_id in list_ids:
+        idx = list_ids.index(activity_id)
+        if idx > 0:
+            prev_id = list_ids[idx - 1]
+        if idx < len(list_ids) - 1:
+            next_id = list_ids[idx + 1]
+
+    return templates.TemplateResponse("activity.html", {
+        "request": request,
+        "activity": activity,
+        "prev_id": prev_id,
+        "next_id": next_id,
+        # Carried forward on the Prev/Next links themselves so continued
+        # navigation keeps working, not just the initial link into here.
+        "nav_query_string": request.url.query,
+    })
 
 
 # ---------------- Training log (period-based view, grouped by month for 1y) ----------------
@@ -920,6 +1005,75 @@ def rebuild(request: Request, db: Session = Depends(get_db)):
 # machine, then moving the already-populated database over to wherever
 # you'll actually run the app day to day.
 
+_current_db_import_job = {"active": False}
+
+
+def _run_db_import_sync(content: bytes, job):
+    """Runs on a background thread - same reasoning as _run_import_sync:
+    a 100MB+ database write can genuinely take a while on slow storage
+    (e.g. a Raspberry Pi's SD card), and this keeps the progress-polling
+    endpoint responsive throughout, and keeps running if you navigate away."""
+    try:
+        if not content.startswith(b"SQLite format 3\x00"):
+            job["phase"] = "error"
+            job["error"] = "That doesn't look like a valid SQLite database file."
+            return
+
+        # Write in chunks (rather than one f.write(content) call) so we can
+        # report real byte-level progress - this is usually the slowest
+        # part for a large file on slow storage, unlike the validation/
+        # swap/migration steps below which are fast regardless of file size.
+        job["phase"] = "writing"
+        job["total"] = len(content)
+        job["processed"] = 0
+        tmp_path = DB_PATH + ".importing"
+        chunk_size = 1024 * 1024  # 1MB
+        with open(tmp_path, "wb") as f:
+            for offset in range(0, len(content), chunk_size):
+                chunk = content[offset:offset + chunk_size]
+                f.write(chunk)
+                job["processed"] += len(chunk)
+
+        job["phase"] = "validating"
+        try:
+            check = sqlite3.connect(tmp_path)
+            tables = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            check.close()
+        except Exception as e:
+            os.remove(tmp_path)
+            job["phase"] = "error"
+            job["error"] = f"Couldn't read that file as a SQLite database: {e}"
+            return
+
+        if "activities" not in tables:
+            os.remove(tmp_path)
+            job["phase"] = "error"
+            job["error"] = "That SQLite file doesn't look like a Matched Runs database (missing the expected tables)."
+            return
+
+        # Close existing connections before swapping the file out from
+        # under them - SQLAlchemy will open fresh ones against the new
+        # file on the next query.
+        job["phase"] = "replacing"
+        engine.dispose()
+        os.replace(tmp_path, DB_PATH)
+
+        # In case the imported database predates a schema change (e.g. it
+        # came from a slightly older version of the app), backfill any new
+        # columns.
+        job["phase"] = "migrating"
+        run_migrations()
+
+        logger.info("Database imported from upload, replacing the previous database entirely.")
+        job["phase"] = "done"
+    except Exception as e:
+        logger.exception("Database import job failed")
+        job["phase"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["active"] = False
+
+
 @app.get("/manage/export-db")
 def export_db():
     # Use SQLite's own backup API rather than just handing back the raw
@@ -942,54 +1096,33 @@ def export_db():
 
 @app.post("/manage/import-db")
 async def import_db(request: Request, db_file: UploadFile = File(...)):
+    if _current_db_import_job.get("active"):
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>A database import is already running. Check the Import "
+            "&amp; Sync page for its progress.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=409,
+        )
+
     content = await db_file.read()
 
-    if not content.startswith(b"SQLite format 3\x00"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>That doesn't look like a valid SQLite database file.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=400,
-        )
+    _current_db_import_job.clear()
+    _current_db_import_job.update({
+        "active": True,
+        "phase": "writing",
+        "processed": 0,
+        "total": len(content),
+        "started_at": time.time(),
+        "error": None,
+    })
+    _spawn_background_task(asyncio.to_thread(_run_db_import_sync, content, _current_db_import_job))
+    return local_redirect(request, "/manage")
 
-    tmp_path = DB_PATH + ".importing"
-    with open(tmp_path, "wb") as f:
-        f.write(content)
 
-    try:
-        check = sqlite3.connect(tmp_path)
-        tables = {row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        check.close()
-    except Exception as e:
-        os.remove(tmp_path)
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            f"<p>Couldn't read that file as a SQLite database: {e}</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=400,
-        )
-
-    if "activities" not in tables:
-        os.remove(tmp_path)
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>That SQLite file doesn't look like a Matched Runs database "
-            "(missing the expected tables).</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=400,
-        )
-
-    # Close existing connections before swapping the file out from under
-    # them - SQLAlchemy will open fresh ones against the new file on the
-    # next query.
-    engine.dispose()
-    os.replace(tmp_path, DB_PATH)
-    # In case the imported database predates a schema change (e.g. it came
-    # from a slightly older version of the app), backfill any new columns.
-    run_migrations()
-
-    logger.info("Database imported from upload, replacing the previous database entirely.")
-    return local_redirect(request, "/manage?db_imported=1")
+@app.get("/manage/db-import-status")
+def db_import_status():
+    return _current_db_import_job
 
 
 # ---------------- Strava OAuth + sync ----------------

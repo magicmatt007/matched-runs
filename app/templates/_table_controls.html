@@ -6,3 +6,5 @@
 {% endif %}
 <a href="{{ base_url }}?sort={{ column }}&dir={{ next_dir }}{% for k, v in carry_params.items() if k not in ['sort', 'dir'] %}&{{ k }}={{ v }}{% endfor %}">{{ label }}{% if current_sort == column %}{% if current_dir == 'asc' %} &uarr;{% else %} &darr;{% endif %}{% endif %}</a>
 {% endmacro %}
+
+{% macro activity_context_query(list_type, carry_params) %}list={{ list_type }}{% for k, v in carry_params.items() %}&{{ k }}={{ v }}{% endfor %}{% endmacro %}
