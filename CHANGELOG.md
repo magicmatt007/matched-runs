@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.2
+- Fixed the remaining gap in database import progress: after the browser
+  finishes sending the file (which 1.9.1 made visible via XHR upload
+  progress), the server still had to read the whole thing into memory via
+  a single blocking `await db_file.read()` before the background job -
+  and *that* was completely untracked, causing the progress bar to sit at
+  100% for several seconds with no feedback before jumping to "done". Now
+  reads the upload in 1MB chunks with progress reported after each one
+  (new "receiving" phase, shown before "writing"), closing the gap between
+  what the browser reports and what the server-side job tracks.
+
 ## 1.9.1
 - Fixed the database import progress bar only appearing in the final
   second: the 1.9.0 implementation only tracked progress *after* the

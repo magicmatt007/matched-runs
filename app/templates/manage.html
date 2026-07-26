@@ -339,7 +339,13 @@
             }
             panel.style.display = 'block';
 
-            if (job.phase === 'writing') {
+            if (job.phase === 'receiving') {
+                var frac = job.total > 0 ? job.processed / job.total : 0;
+                content.innerHTML =
+                    '<p>Server receiving upload: ' + formatBytes(job.processed) + ' / ' + formatBytes(job.total) + '</p>' +
+                    progressBar(frac) +
+                    etaLine(frac, job.started_at);
+            } else if (job.phase === 'writing') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML =
                     '<p>Writing database: ' + formatBytes(job.processed) + ' / ' + formatBytes(job.total) + '</p>' +

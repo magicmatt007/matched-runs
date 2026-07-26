@@ -1105,17 +1105,44 @@ async def import_db(request: Request, db_file: UploadFile = File(...)):
             status_code=409,
         )
 
-    content = await db_file.read()
+    # The declared Content-Length is the whole multipart body (slightly
+    # larger than the file itself, due to multipart boundaries/headers) -
+    # close enough for a progress percentage/ETA here, corrected to the
+    # exact byte count once reading finishes below.
+    try:
+        declared_total = int(request.headers.get("content-length", "0"))
+    except ValueError:
+        declared_total = 0
 
     _current_db_import_job.clear()
     _current_db_import_job.update({
         "active": True,
-        "phase": "writing",
+        "phase": "receiving",
         "processed": 0,
-        "total": len(content),
+        "total": declared_total,
         "started_at": time.time(),
         "error": None,
     })
+
+    # Read in chunks rather than one `await db_file.read()` call,
+    # specifically so this phase is visible in the progress UI - a single
+    # read() here was completely invisible to any tracking, even though it
+    # can take just as long as the disk-write phase on a large file over a
+    # slow connection or slow server storage (this is what was actually
+    # causing the "progress bar full, then nothing for 5-10s" gap). Chunked
+    # async reads also naturally yield to the event loop between chunks,
+    # so the status-polling endpoint stays responsive throughout.
+    chunk_size = 1024 * 1024
+    chunks = []
+    while True:
+        chunk = await db_file.read(chunk_size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        _current_db_import_job["processed"] += len(chunk)
+    content = b"".join(chunks)
+    _current_db_import_job["total"] = len(content)  # now known exactly
+
     _spawn_background_task(asyncio.to_thread(_run_db_import_sync, content, _current_db_import_job))
     return local_redirect(request, "/manage")
 
