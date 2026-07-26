@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.2
+- Fixed tiny, hard-to-read chart labels on mobile (Training Log's distance
+  chart, and the pace-over-time chart on each route's page). Root cause:
+  both charts used a fixed SVG coordinate system (800 units wide)
+  regardless of actual screen size, and since the whole SVG scales down to
+  fit its container, a fixed font-size shrinks right along with it - on a
+  ~350px-wide phone, an "11-unit" label was rendering as roughly 5 real
+  pixels. Both charts now size their coordinate system to the container's
+  actual rendered width, so 1 SVG unit = 1 real screen pixel on any
+  device, and bumped the base font sizes for better legibility even on
+  desktop. Also made the number of x-axis date labels shown on the
+  distance chart adapt to how much width is actually available, rather
+  than a fixed count, so labels don't overlap on narrow screens - verified
+  this stays comfortably spaced (46-58px per label) across desktop,
+  tablet, and phone-width scenarios before shipping.
+
 ## 1.10.1
 - Fixed a broken app startup introduced in 1.10.0: the `@app.get("/manage")`
   decorator ended up attached to the wrong function (`_group_activity_counts`,

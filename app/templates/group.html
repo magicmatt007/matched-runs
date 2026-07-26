@@ -118,8 +118,14 @@ if (bounds.length) {
         return;
     }
 
-    var width = 800, height = 220;
-    var padding = { top: 16, right: 16, bottom: 16, left: 64 };
+    // Match the viewBox width to the container's ACTUAL rendered width, so
+    // 1 SVG unit = 1 real screen pixel on any device - a fixed viewBox
+    // (e.g. always 800 units) gets scaled down to fit a narrow phone
+    // screen, shrinking a fixed font-size right along with it, which is
+    // exactly why the labels were unreadable on mobile specifically.
+    var width = container.clientWidth || 800;
+    var height = 220;
+    var padding = { top: 16, right: 16, bottom: 16, left: 68 };
     var plotW = width - padding.left - padding.right;
     var plotH = height - padding.top - padding.bottom;
 
@@ -153,7 +159,7 @@ if (bounds.length) {
         var pace = minPace + (t / tickCount) * (maxPace - minPace);
         var y = yFor(pace);
         svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
-        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="#8b8f9a">' + formatPace(pace) + '</text>';
+        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="13" fill="#8b8f9a">' + formatPace(pace) + '</text>';
     }
 
     var linePoints = points.map(function (p, i) { return xFor(i) + ',' + yFor(p.pace_s_per_km); }).join(' ');
