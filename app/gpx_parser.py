@@ -9,6 +9,15 @@ def _local_tag(tag):
 
 
 def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
+    # Some Strava exports have stray leading whitespace before the XML
+    # declaration, which strict XML parsers reject outright since <?xml
+    # ...?> must be the very first thing in the document. Confirmed on TCX
+    # exports from the same batch tooling - stripping this proactively
+    # here too, since it's a no-op for any already-well-formed file.
+    first_tag = data.find(b"<")
+    if first_tag > 0:
+        data = data[first_tag:]
+
     gpx = gpxpy.parse(data.decode("utf-8", errors="ignore"))
 
     points = []

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.2
+- Fixed TCX/GPX import failing with "XML or text declaration not at start
+  of entity" on some Strava export files - traced to a quirk in Strava's
+  own export tooling that adds a few stray leading whitespace characters
+  before the `<?xml ...?>` declaration, which strict XML parsers reject
+  outright (the spec requires it to be the very first thing in the file).
+  Now strips anything before the first `<` before parsing. Verified against
+  the actual reported file (confirmed the exact same error reproduces
+  without the fix, and that real data - 4594 GPS points, elevation,
+  calories - extracts correctly with it).
+
 ## 1.6.1
 - Documented the Home Assistant ingress 16MB request-body limit (a hardcoded
   Supervisor restriction, not something this app can fix) that breaks

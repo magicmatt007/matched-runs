@@ -17,6 +17,15 @@ def _local(tag):
 
 
 def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
+    # Some Strava TCX exports have stray leading whitespace before the XML
+    # declaration - the XML spec requires <?xml ...?> to be the very first
+    # thing in the document with nothing preceding it at all, so even a
+    # few leading spaces make strict parsers reject the file outright.
+    # Strip anything before the first '<' rather than fail on this.
+    first_tag = data.find(b"<")
+    if first_tag > 0:
+        data = data[first_tag:]
+
     root = ET.fromstring(data)
 
     sport = None
