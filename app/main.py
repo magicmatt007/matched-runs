@@ -1013,6 +1013,8 @@ def _run_db_import_sync(content: bytes, job):
     a 100MB+ database write can genuinely take a while on slow storage
     (e.g. a Raspberry Pi's SD card), and this keeps the progress-polling
     endpoint responsive throughout, and keeps running if you navigate away."""
+    t_start = time.time()
+    logger.info("[db-import] background job starting with %d bytes in hand", len(content))
     try:
         if not content.startswith(b"SQLite format 3\x00"):
             job["phase"] = "error"
@@ -1033,6 +1035,8 @@ def _run_db_import_sync(content: bytes, job):
                 chunk = content[offset:offset + chunk_size]
                 f.write(chunk)
                 job["processed"] += len(chunk)
+        t_write_done = time.time()
+        logger.info("[db-import] wrote %d bytes to disk in %.2fs", len(content), t_write_done - t_start)
 
         job["phase"] = "validating"
         try:
@@ -1044,6 +1048,8 @@ def _run_db_import_sync(content: bytes, job):
             job["phase"] = "error"
             job["error"] = f"Couldn't read that file as a SQLite database: {e}"
             return
+        t_validate_done = time.time()
+        logger.info("[db-import] validated in %.2fs", t_validate_done - t_write_done)
 
         if "activities" not in tables:
             os.remove(tmp_path)
@@ -1057,14 +1063,25 @@ def _run_db_import_sync(content: bytes, job):
         job["phase"] = "replacing"
         engine.dispose()
         os.replace(tmp_path, DB_PATH)
+        t_replace_done = time.time()
+        logger.info("[db-import] replaced database file in %.2fs", t_replace_done - t_validate_done)
 
         # In case the imported database predates a schema change (e.g. it
         # came from a slightly older version of the app), backfill any new
         # columns.
         job["phase"] = "migrating"
         run_migrations()
+        t_migrate_done = time.time()
+        logger.info("[db-import] ran migrations in %.2fs", t_migrate_done - t_replace_done)
 
-        logger.info("Database imported from upload, replacing the previous database entirely.")
+        logger.info(
+            "[db-import] background job finished, total %.2fs (write=%.2fs validate=%.2fs replace=%.2fs migrate=%.2fs)",
+            t_migrate_done - t_start,
+            t_write_done - t_start,
+            t_validate_done - t_write_done,
+            t_replace_done - t_validate_done,
+            t_migrate_done - t_replace_done,
+        )
         job["phase"] = "done"
     except Exception as e:
         logger.exception("Database import job failed")
@@ -1138,6 +1155,9 @@ async def import_db(request: Request):
             status_code=409,
         )
 
+    t_request_start = time.time()
+    logger.info("[db-import] request received")
+
     boundary = _extract_boundary(request.headers.get("content-type", ""))
     if not boundary:
         prefix = ingress_prefix(request)
@@ -1162,7 +1182,7 @@ async def import_db(request: Request):
         "phase": "receiving",
         "processed": 0,
         "total": declared_total,
-        "started_at": time.time(),
+        "started_at": t_request_start,
         "error": None,
     })
 
@@ -1176,13 +1196,29 @@ async def import_db(request: Request):
     # access as bytes actually arrive over the network, which is what
     # progress here needs to be based on.
     raw_chunks = []
+    chunk_count = 0
     async for chunk in request.stream():
         raw_chunks.append(chunk)
+        chunk_count += 1
         _current_db_import_job["processed"] += len(chunk)
+    t_stream_done = time.time()
+    logger.info(
+        "[db-import] request.stream() finished: %d chunks, %d bytes, %.2fs (declared content-length was %d)",
+        chunk_count, sum(len(c) for c in raw_chunks), t_stream_done - t_request_start, declared_total,
+    )
+
     raw_body = b"".join(raw_chunks)
+    t_join_done = time.time()
+    logger.info("[db-import] joined chunks into %d bytes in %.2fs", len(raw_body), t_join_done - t_stream_done)
     _current_db_import_job["total"] = len(raw_body)
 
     content = _extract_single_file_part(raw_body, boundary)
+    t_extract_done = time.time()
+    logger.info(
+        "[db-import] multipart extraction finished in %.2fs, extracted %s bytes",
+        t_extract_done - t_join_done, len(content) if content is not None else "None (FAILED)",
+    )
+
     if content is None:
         _current_db_import_job["active"] = False
         _current_db_import_job["phase"] = "error"
@@ -1194,6 +1230,7 @@ async def import_db(request: Request):
             status_code=400,
         )
 
+    logger.info("[db-import] spawning background job, %.2fs since request started", time.time() - t_request_start)
     _spawn_background_task(asyncio.to_thread(_run_db_import_sync, content, _current_db_import_job))
     return local_redirect(request, "/manage")
 

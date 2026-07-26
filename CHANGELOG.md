@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.4
+- 1.9.3 apparently didn't fix the database import progress gap either (it
+  reportedly got *longer*) - rather than guess at the architecture a fifth
+  time, this adds precise timing logs to every single phase of the import
+  pipeline: request received, stream reading finished, chunk joining
+  finished, multipart extraction finished, background job spawned,
+  background job actually started, and each of writing/validating/
+  replacing/migrating within it. This is a diagnostic release, not a
+  claimed fix - the next step is running an import once more and reading
+  off the container logs to see exactly where the real time is going,
+  since continuing to reason about framework internals without that data
+  hasn't worked.
+
 ## 1.9.3
 - Actually fixed the database import progress gap this time (1.9.2's fix
   didn't help, as reported) - the real cause: FastAPI's `UploadFile =
