@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.3
+- Actually fixed the database import progress gap this time (1.9.2's fix
+  didn't help, as reported) - the real cause: FastAPI's `UploadFile =
+  File(...)` parameter makes Starlette fully consume and parse the entire
+  multipart request body as part of resolving that dependency, before the
+  route function's own code runs at all. 1.9.2's "chunked read" was
+  reading from a file Starlette had already fully received and buffered
+  internally - so no amount of chunking inside the function body could
+  ever make that phase visible, no matter how it was written. Confirmed
+  this against a FastAPI maintainer discussion of the exact same issue
+  before writing another fix blind a third time.
+  The fix: stop declaring `UploadFile = File(...)` for this route entirely,
+  and consume `request.stream()` directly instead, which does give real
+  chunk-by-chunk access as bytes physically arrive over the network. Since
+  this bypasses Starlette's automatic multipart parsing, the file's
+  content now gets extracted with a small hand-written parser instead
+  (intentionally not a general-purpose multipart parser - just enough for
+  our own upload form's shape: one file field, nothing else). Verified
+  this against a realistic browser-shaped multipart body byte-for-byte,
+  including the tricky case of binary content containing embedded CRLF
+  sequences, before wiring it into the actual route.
+
 ## 1.9.2
 - Fixed the remaining gap in database import progress: after the browser
   finishes sending the file (which 1.9.1 made visible via XHR upload

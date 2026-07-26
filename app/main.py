@@ -1094,8 +1094,41 @@ def export_db():
     )
 
 
+def _extract_boundary(content_type: str):
+    if not content_type or "boundary=" not in content_type:
+        return None
+    boundary = content_type.split("boundary=", 1)[1]
+    boundary = boundary.split(";", 1)[0].strip().strip('"')
+    return boundary.encode()
+
+
+def _extract_single_file_part(raw_body: bytes, boundary: bytes):
+    """Extracts the content of the (single) file part from a simple
+    multipart/form-data body with exactly one file field - not a general
+    RFC2046 multipart parser, just enough for our own upload form's shape
+    (one file input, nothing else). Verified against realistic
+    browser-shaped multipart bodies, including binary content containing
+    embedded CRLF sequences, before relying on it here."""
+    marker = b"--" + boundary
+    parts = raw_body.split(marker)
+    for part in parts:
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        header_end = part.find(b"\r\n\r\n")
+        if header_end == -1:
+            continue
+        headers_blob = part[:header_end]
+        body_blob = part[header_end + 4:]
+        if b"filename=" in headers_blob:
+            if body_blob.endswith(b"\r\n"):
+                body_blob = body_blob[:-2]
+            return body_blob
+    return None
+
+
 @app.post("/manage/import-db")
-async def import_db(request: Request, db_file: UploadFile = File(...)):
+async def import_db(request: Request):
     if _current_db_import_job.get("active"):
         prefix = ingress_prefix(request)
         return HTMLResponse(
@@ -1105,10 +1138,19 @@ async def import_db(request: Request, db_file: UploadFile = File(...)):
             status_code=409,
         )
 
+    boundary = _extract_boundary(request.headers.get("content-type", ""))
+    if not boundary:
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>Invalid upload request (missing multipart boundary).</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=400,
+        )
+
     # The declared Content-Length is the whole multipart body (slightly
-    # larger than the file itself, due to multipart boundaries/headers) -
-    # close enough for a progress percentage/ETA here, corrected to the
-    # exact byte count once reading finishes below.
+    # larger than the file itself, due to boundaries/headers) - close
+    # enough for a progress percentage/ETA, corrected to the exact byte
+    # count once reading finishes below.
     try:
         declared_total = int(request.headers.get("content-length", "0"))
     except ValueError:
@@ -1124,24 +1166,33 @@ async def import_db(request: Request, db_file: UploadFile = File(...)):
         "error": None,
     })
 
-    # Read in chunks rather than one `await db_file.read()` call,
-    # specifically so this phase is visible in the progress UI - a single
-    # read() here was completely invisible to any tracking, even though it
-    # can take just as long as the disk-write phase on a large file over a
-    # slow connection or slow server storage (this is what was actually
-    # causing the "progress bar full, then nothing for 5-10s" gap). Chunked
-    # async reads also naturally yield to the event loop between chunks,
-    # so the status-polling endpoint stays responsive throughout.
-    chunk_size = 1024 * 1024
-    chunks = []
-    while True:
-        chunk = await db_file.read(chunk_size)
-        if not chunk:
-            break
-        chunks.append(chunk)
+    # Deliberately NOT using UploadFile = File(...) here - FastAPI/Starlette
+    # fully consumes and parses the entire multipart body as part of
+    # resolving that dependency, BEFORE this function body even starts
+    # running. That made every previous attempt at tracking this phase
+    # invisible, no matter how the code inside the function was written -
+    # the slow part was already over by the time our code got a chance to
+    # observe anything. request.stream() instead gives real chunk-by-chunk
+    # access as bytes actually arrive over the network, which is what
+    # progress here needs to be based on.
+    raw_chunks = []
+    async for chunk in request.stream():
+        raw_chunks.append(chunk)
         _current_db_import_job["processed"] += len(chunk)
-    content = b"".join(chunks)
-    _current_db_import_job["total"] = len(content)  # now known exactly
+    raw_body = b"".join(raw_chunks)
+    _current_db_import_job["total"] = len(raw_body)
+
+    content = _extract_single_file_part(raw_body, boundary)
+    if content is None:
+        _current_db_import_job["active"] = False
+        _current_db_import_job["phase"] = "error"
+        _current_db_import_job["error"] = "Couldn't find the uploaded file in the request."
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>Couldn't find the uploaded file in the request.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=400,
+        )
 
     _spawn_background_task(asyncio.to_thread(_run_db_import_sync, content, _current_db_import_job))
     return local_redirect(request, "/manage")
