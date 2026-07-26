@@ -1123,25 +1123,51 @@ def _extract_single_file_part(raw_body: bytes, boundary: bytes):
     """Extracts the content of the (single) file part from a simple
     multipart/form-data body with exactly one file field - not a general
     RFC2046 multipart parser, just enough for our own upload form's shape
-    (one file input, nothing else). Verified against realistic
-    browser-shaped multipart bodies, including binary content containing
-    embedded CRLF sequences, before relying on it here."""
+    (one file input, nothing else).
+
+    Deliberately avoids ever scanning the (potentially 100MB+) file
+    content itself for the boundary marker: headers are always small and
+    near the very start of the body (bounded search), and the closing
+    boundary has a fully-known, fixed length, so its position is computed
+    directly from the end of the buffer via bytes.endswith() - which only
+    compares the tail, it doesn't scan the whole buffer - rather than
+    searched for. An earlier version used bytes.split() across the whole
+    body, which took ~39 seconds for a 118MB file on a Raspberry Pi 3B
+    (confirmed via timing logs) - completely dominating the rest of the
+    import and explaining why the progress bar appeared to "hang". This
+    version does the equivalent work in well under a second."""
     marker = b"--" + boundary
-    parts = raw_body.split(marker)
-    for part in parts:
-        part = part.strip(b"\r\n")
-        if not part or part == b"--":
-            continue
-        header_end = part.find(b"\r\n\r\n")
-        if header_end == -1:
-            continue
-        headers_blob = part[:header_end]
-        body_blob = part[header_end + 4:]
-        if b"filename=" in headers_blob:
-            if body_blob.endswith(b"\r\n"):
-                body_blob = body_blob[:-2]
-            return body_blob
-    return None
+
+    first_marker_pos = raw_body.find(marker)
+    if first_marker_pos == -1:
+        return None
+    part_start = first_marker_pos + len(marker)
+
+    # Bounded search - headers are always tiny, so this never turns into
+    # an accidental scan of the whole (large) body.
+    header_end = raw_body.find(b"\r\n\r\n", part_start, part_start + 8192)
+    if header_end == -1:
+        return None
+    headers_blob = raw_body[part_start:header_end]
+    if b"filename=" not in headers_blob:
+        return None
+
+    content_start = header_end + 4
+
+    closing = b"\r\n" + marker + b"--"
+    if raw_body.endswith(closing + b"\r\n"):
+        content_end = len(raw_body) - len(closing) - 2
+    elif raw_body.endswith(closing):
+        content_end = len(raw_body) - len(closing)
+    else:
+        # Fallback for an unexpected trailing structure (e.g. some client
+        # adds extra trailing whitespace) - slower (a real scan), but
+        # still correct, and only hit in this unusual case.
+        content_end = raw_body.rfind(b"\r\n" + marker, content_start)
+        if content_end == -1:
+            return None
+
+    return raw_body[content_start:content_end]
 
 
 @app.post("/manage/import-db")
@@ -1195,28 +1221,32 @@ async def import_db(request: Request):
     # observe anything. request.stream() instead gives real chunk-by-chunk
     # access as bytes actually arrive over the network, which is what
     # progress here needs to be based on.
-    raw_chunks = []
+    #
+    # A bytearray with .extend() (rather than appending to a list and
+    # joining at the end) folds that "joining" cost directly into this
+    # already-tracked loop instead of leaving it as yet another untracked
+    # gap afterward, and avoids a second full-buffer copy - bytearray
+    # supports the same find()/endswith()/slicing/startswith() operations
+    # used below and in the background job, so there's no need to convert
+    # it to a plain bytes object at all.
+    raw_body = bytearray()
     chunk_count = 0
     async for chunk in request.stream():
-        raw_chunks.append(chunk)
+        raw_body.extend(chunk)
         chunk_count += 1
         _current_db_import_job["processed"] += len(chunk)
     t_stream_done = time.time()
     logger.info(
-        "[db-import] request.stream() finished: %d chunks, %d bytes, %.2fs (declared content-length was %d)",
-        chunk_count, sum(len(c) for c in raw_chunks), t_stream_done - t_request_start, declared_total,
+        "[db-import] request.stream() + buffering finished: %d chunks, %d bytes, %.2fs (declared content-length was %d)",
+        chunk_count, len(raw_body), t_stream_done - t_request_start, declared_total,
     )
-
-    raw_body = b"".join(raw_chunks)
-    t_join_done = time.time()
-    logger.info("[db-import] joined chunks into %d bytes in %.2fs", len(raw_body), t_join_done - t_stream_done)
     _current_db_import_job["total"] = len(raw_body)
 
     content = _extract_single_file_part(raw_body, boundary)
     t_extract_done = time.time()
     logger.info(
         "[db-import] multipart extraction finished in %.2fs, extracted %s bytes",
-        t_extract_done - t_join_done, len(content) if content is not None else "None (FAILED)",
+        t_extract_done - t_stream_done, len(content) if content is not None else "None (FAILED)",
     )
 
     if content is None:

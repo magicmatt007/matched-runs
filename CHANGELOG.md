@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.5
+- Found the real cause of the database import gap, thanks to the timing
+  logs added in 1.9.4 and a real log capture from an actual Raspberry Pi
+  3B import: 1.9.3's own fix was the problem. Extracting the file from the
+  multipart body used `bytes.split()` across the whole ~118MB buffer, and
+  on the Pi's weak CPU that alone took **38.75 seconds** - more than every
+  other phase combined (receive 32.6s, write 2.8s, validate 1.1s, replace
+  2.4s, migrate 0.03s) - and it wasn't tracked by any progress phase,
+  which is exactly the invisible gap being reported.
+  Rewrote the extraction to never scan the large file content at all: the
+  headers are always small and near the very start (bounded search), and
+  the closing boundary has a fully-known fixed length, so its position is
+  *computed* from the end of the buffer via `bytes.endswith()` (which only
+  compares the tail, not the whole buffer) instead of searched for.
+  Benchmarked at 24-29x faster against the old approach on a 120MB
+  synthetic body, and verified byte-for-byte identical output.
+  Also folded the previously-separate "joining chunks" step (7.9s in the
+  same log capture, itself untracked) directly into the receiving loop by
+  using a growable bytearray instead of building a list and joining it
+  afterward - removing that gap too, and avoiding an extra full-buffer
+  copy in the process.
+  Kept the phase-by-phase timing logs from 1.9.4 in place, since they're
+  what actually made this diagnosable instead of another guess.
+
 ## 1.9.4
 - 1.9.3 apparently didn't fix the database import progress gap either (it
   reportedly got *longer*) - rather than guess at the architecture a fifth
