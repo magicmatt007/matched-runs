@@ -1262,7 +1262,16 @@ async def import_db(request: Request):
 
     logger.info("[db-import] spawning background job, %.2fs since request started", time.time() - t_request_start)
     _spawn_background_task(asyncio.to_thread(_run_db_import_sync, content, _current_db_import_job))
-    return local_redirect(request, "/manage")
+    # Deliberately NOT a redirect: this request is driven by XHR (for real
+    # upload-progress tracking, see below), and XMLHttpRequest transparently
+    # follows redirects - which would make it wait for the ENTIRE /manage
+    # page to render (querying every route group and activity) before
+    # xhr.load fires, adding a slow, completely untracked delay unrelated
+    # to the actual import. A plain fast acknowledgment lets xhr.load fire
+    # immediately once the background job is spawned, so the JS can start
+    # polling for real progress right away instead of waiting on a page
+    # render it doesn't even use.
+    return HTMLResponse("started", status_code=202)
 
 
 @app.get("/manage/db-import-status")

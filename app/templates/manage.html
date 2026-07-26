@@ -410,6 +410,16 @@
                 });
 
                 xhr.addEventListener('load', function () {
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        // Server responded with an error (e.g. 409 already
+                        // running, 400 invalid file) - load still fires for
+                        // this, it's not just for success responses. Show
+                        // whatever the server said instead of assuming
+                        // success and starting to poll for a job that
+                        // never actually started.
+                        content.innerHTML = xhr.responseText || '<p style="color:#e6194b;">Import failed.</p>';
+                        return;
+                    }
                     // Upload finished - the server has (or is about to
                     // have) started its background job. Switch to polling
                     // its status for the write/validate/replace/migrate

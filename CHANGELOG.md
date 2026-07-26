@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.9.6
+- The 1.9.5 extraction fix itself worked exactly as intended (confirmed
+  against a second real log capture: 38.75s → 5.56s for the same ~118MB
+  file - a ~7x improvement on actual Pi hardware), but a bigger issue was
+  hiding behind it: the background job finished at 15:11:59 in that log,
+  yet the next request the server saw was at 15:12:36 - a 37 second gap
+  with nothing happening at all, well after the import itself was done.
+  Cause: `XMLHttpRequest` automatically follows redirects, and the import
+  endpoint returned one (to support the old plain-form-submission flow).
+  That meant the XHR - used specifically to get real upload progress -
+  was transparently waiting for the *entire* `/manage` page to finish
+  rendering (querying every route group and activity) before `xhr.load`
+  fired, adding a slow, completely untracked delay that has nothing to do
+  with the import pipeline itself. This is very likely the actual
+  remaining gap being reported, on top of whatever the 1.9.5 fix already
+  improved.
+  Fixed by having this endpoint return a minimal, fast acknowledgment
+  instead of a redirect, so `xhr.load` fires immediately once the
+  background job is spawned rather than waiting on an unrelated page
+  render. Also fixed a related gap while in this code: `xhr.load` fires
+  for HTTP error responses too (e.g. 409 "already running"), not just
+  successes - the JS now checks the status code before assuming success
+  and starting to poll for a job that never started.
+
 ## 1.9.5
 - Found the real cause of the database import gap, thanks to the timing
   logs added in 1.9.4 and a real log capture from an actual Raspberry Pi
