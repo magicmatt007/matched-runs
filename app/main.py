@@ -325,21 +325,19 @@ templates.env.filters["pace"] = format_pace
 
 
 @app.get("/manage", response_class=HTMLResponse)
-def manage_page(request: Request, db: Session = Depends(get_db)):
-    groups = (
-        db.query(RouteGroup)
-        .order_by(RouteGroup.avg_distance_m.desc())
-        .all()
-    )
-    group_counts = {g.id: len(g.activities) for g in groups}
-    groups = sorted(groups, key=lambda g: group_counts[g.id], reverse=True)
+def _group_activity_counts(db: Session, group_ids=None):
+    """Returns {group_id: count} via a single GROUP BY query, instead of
+    lazy-loading each group's .activities relationship one at a time (a
+    real N+1 problem - each lazy-load is a separate SQL query, and with
+    enough route groups this got slow, especially on weaker hardware)."""
+    query = db.query(Activity.group_id, func.count(Activity.id)).filter(Activity.group_id.isnot(None))
+    if group_ids is not None:
+        query = query.filter(Activity.group_id.in_(group_ids))
+    query = query.group_by(Activity.group_id)
+    return {gid: count for gid, count in query.all()}
 
-    ungrouped = (
-        db.query(Activity)
-        .filter(Activity.group_id.is_(None))
-        .order_by(Activity.start_time.desc())
-        .all()
-    )
+
+def manage_page(request: Request, db: Session = Depends(get_db)):
     total_activities = db.query(func.count(Activity.id)).scalar()
     strava_connected = db.query(StravaToken).first() is not None
 
@@ -355,9 +353,6 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
 
     return templates.TemplateResponse("manage.html", {
         "request": request,
-        "groups": groups,
-        "group_counts": group_counts,
-        "ungrouped": ungrouped,
         "total_activities": total_activities,
         "strava_connected": strava_connected,
         "strava_configured": strava_client.is_configured(),
@@ -368,6 +363,23 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "import_job": _current_import_job,
         "garmin_sync_job": _current_garmin_sync_job,
         "db_import_job": _current_db_import_job,
+    })
+
+
+@app.get("/routes", response_class=HTMLResponse)
+def routes_page(request: Request, db: Session = Depends(get_db)):
+    groups = (
+        db.query(RouteGroup)
+        .order_by(RouteGroup.avg_distance_m.desc())
+        .all()
+    )
+    group_counts = _group_activity_counts(db, [g.id for g in groups])
+    groups = sorted(groups, key=lambda g: group_counts.get(g.id, 0), reverse=True)
+
+    return templates.TemplateResponse("routes.html", {
+        "request": request,
+        "groups": groups,
+        "group_counts": group_counts,
     })
 
 
@@ -609,6 +621,9 @@ def activities_list(request: Request, type: str = None, page: int = 1,
         row[0] for row in db.query(Activity.activity_type).distinct().all() if row[0]
     })
 
+    group_ids_on_page = [a.group_id for a in activities if a.group_id]
+    group_counts = _group_activity_counts(db, group_ids_on_page) if group_ids_on_page else {}
+
     return templates.TemplateResponse("activities.html", {
         "request": request,
         "activities": activities,
@@ -623,6 +638,7 @@ def activities_list(request: Request, type: str = None, page: int = 1,
         "dir": direction,
         "filters": {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS},
         "carry_params": build_carry_params(request),
+        "group_counts": group_counts,
     })
 
 
@@ -749,11 +765,17 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         if idx < len(list_ids) - 1:
             next_id = list_ids[idx + 1]
 
+    group_count = None
+    if activity and activity.group_id:
+        counts = _group_activity_counts(db, [activity.group_id])
+        group_count = counts.get(activity.group_id, 0)
+
     return templates.TemplateResponse("activity.html", {
         "request": request,
         "activity": activity,
         "prev_id": prev_id,
         "next_id": next_id,
+        "group_count": group_count,
         # Carried forward on the Prev/Next links themselves so continued
         # navigation keeps working, not just the initial link into here.
         "nav_query_string": request.url.query,
@@ -915,6 +937,9 @@ def training_log(request: Request, type: str = None, period: str = "7d",
     avg_weekly_km = (total_distance_km / span_days * 7) if span_days else 0.0
     avg_monthly_km = (total_distance_km / span_days * 30.44) if span_days else 0.0
 
+    group_ids_shown = [a.group_id for a in activities if a.group_id]
+    group_counts = _group_activity_counts(db, group_ids_shown) if group_ids_shown else {}
+
     return templates.TemplateResponse("log.html", {
         "request": request,
         "types": types,
@@ -934,6 +959,7 @@ def training_log(request: Request, type: str = None, period: str = "7d",
         "avg_weekly_km": avg_weekly_km,
         "avg_monthly_km": avg_monthly_km,
         "can_go_next_period": offset > 0,
+        "group_counts": group_counts,
     })
 
 

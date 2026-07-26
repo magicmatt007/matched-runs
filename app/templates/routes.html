@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% set base_path = request.headers.get('X-Ingress-Path', '') %}
+{% block title %}Matched Routes{% endblock %}
+{% block content %}
+
+<h2>Matched routes ({{ groups|length }})</h2>
+{% if not groups %}
+    <p class="muted">No matched routes yet. Upload at least two GPX files covering the same route, or sync from Strava/Garmin.</p>
+{% endif %}
+<div class="grid">
+    {% for g in groups %}
+    <a class="card" href="{{ base_path }}/group/{{ g.id }}">
+        <h3>{{ g.name }}</h3>
+        <p>{{ group_counts.get(g.id, 0) }} runs matched</p>
+    </a>
+    {% endfor %}
+</div>
+
+{% endblock %}

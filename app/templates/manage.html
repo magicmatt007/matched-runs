@@ -151,36 +151,6 @@
     <div id="garmin-progress-content"></div>
 </section>
 
-<section class="panel">
-    <h2>Matched routes ({{ groups|length }})</h2>
-    {% if not groups %}
-        <p class="muted">No matched routes yet. Upload at least two GPX files covering the same route, or sync from Strava.</p>
-    {% endif %}
-    <div class="grid">
-        {% for g in groups %}
-        <a class="card" href="{{ base_path }}/group/{{ g.id }}">
-            <h3>{{ g.name }}</h3>
-            <p>{{ group_counts[g.id] }} runs matched</p>
-        </a>
-        {% endfor %}
-    </div>
-</section>
-
-{% if ungrouped %}
-<section class="panel">
-    <h2>Unmatched activities ({{ ungrouped|length }})</h2>
-    <div class="grid">
-        {% for a in ungrouped %}
-        <a class="card" href="{{ base_path }}/activity/{{ a.id }}">
-            <h3>{{ a.name }}</h3>
-            <p>{{ "%.1f"|format(a.distance_m / 1000) }} km &middot; {{ a.duration_s | hms }} &middot; {{ a | pace }}
-               {% if a.start_time %} &middot; {{ a.start_time.strftime("%Y-%m-%d") }}{% endif %}</p>
-        </a>
-        {% endfor %}
-    </div>
-</section>
-{% endif %}
-
 <script>
 (function () {
     // Shared helpers between the import-progress and Garmin-sync-progress

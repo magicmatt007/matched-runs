@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.10.0
+- The Import & Sync page no longer shows "Matched routes" or "Unmatched
+  activities" at all - good question from testing that surfaced this: it
+  had no real reason to query or display activity data in the first
+  place, since that's exactly what the Home page and route pages are for.
+  This dates back to when Home was first split out from Import & Sync;
+  the plan then was for a dedicated routes page, which never actually got
+  built - these sections just stayed on Import & Sync ever since, adding
+  unnecessary queries to a page that should just be about actions (upload,
+  sync, export/import, cleanup tools).
+  "Matched routes" now has its own page (linked from the header, next to
+  Training Log). "Unmatched activities" isn't shown separately anywhere
+  anymore - the Home page's "All Activities" table already covers exactly
+  the same activities (marked "no match" in the Matched Route column), with
+  sorting/filtering/pagination Import & Sync's old plain grid never had.
+
+## 1.9.7
+- Found and fixed a real, independent performance problem: navigating to
+  the Import & Sync page was slow *on its own*, completely unrelated to
+  the import feature (confirmed by testing it directly) - this validates
+  the 1.9.6 theory about that page's render being slow, but as a
+  standalone issue, not just a side effect of the redirect bug.
+  Cause: computing each route group's activity count did
+  `len(group.activities)` per group, which lazy-loads that group's full
+  activity list with a separate SQL query *every time* - a classic N+1
+  query problem. With enough route groups (years of history naturally
+  accumulates many), this turned one page load into potentially hundreds
+  of individual queries, which adds up fast on weaker hardware. The exact
+  same pattern also existed in the "All Activities" page and the Training
+  Log's activity table (up to ~100 extra queries per page load each) and
+  the single-activity detail page (one extra query).
+  Replaced all four with a single `GROUP BY` aggregate query computed once
+  per page load, regardless of how many route groups exist. Also capped
+  the "Unmatched activities" list on the Import & Sync page at 50 (it had
+  no limit at all before, so years of one-off/indoor activities were being
+  queried and rendered in full on every visit) with a link to the full,
+  paginated "All Activities" page for the rest.
+
 ## 1.9.6
 - The 1.9.5 extraction fix itself worked exactly as intended (confirmed
   against a second real log capture: 38.75s → 5.56s for the same ~118MB

@@ -97,7 +97,7 @@
                 <td>{{ a | pace }}</td>
                 <td>
                     {% if a.group_id %}
-                        <a href="{{ base_path }}/group/{{ a.group_id }}">{{ a.group.activities|length }} runs</a>
+                        <a href="{{ base_path }}/group/{{ a.group_id }}">{{ group_counts.get(a.group_id, 0) }} runs</a>
                     {% else %}
                         <span class="muted">no match</span>
                     {% endif %}

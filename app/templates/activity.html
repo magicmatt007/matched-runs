@@ -22,7 +22,7 @@
     &middot; {{ activity.source }}
 </p>
 {% if activity.group_id %}
-<p><a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ activity.group.activities|length - 1 }} other matched run(s) on this route &rarr;</a></p>
+<p><a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ (group_count or 1) - 1 }} other matched run(s) on this route &rarr;</a></p>
 {% elif activity.full_points %}
 <p class="muted">No matches found yet for this route.</p>
 {% else %}
