@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.13.0
+- The 1.12.2 timing logs paid off: for a real 2020-file Strava import,
+  parsing was 95.7% of the entire 977-second total (934.6s), while route
+  matching (17.5s) and per-activity saving/dedup (21.8s) - the things
+  originally suspected - turned out to barely matter at all. Both earlier
+  hypotheses were wrong; the data made that unambiguous.
+  - Tried a targeted fix first: the FIT parser calls a `get_value(name)`
+    method up to 6 times per GPS point, each doing its own internal search
+    through that record's fields. Rewrote it to build a lookup dict once
+    per point instead. Verified functionally identical output against a
+    stub matching the library's documented API - but a directional timing
+    test of the access pattern itself came back inconclusive (the "faster"
+    version was marginally slower in that isolated test), so this is
+    shipped as a harmless, correctness-verified change, not a claimed
+    performance fix.
+  - The real fix: parsing is CPU-bound and every file is independent of
+    every other, so bulk import now parses files across multiple worker
+    processes (up to 8, or fewer on lower-core hardware like a Raspberry
+    Pi) instead of one at a time on a single core. Saving to the database
+    stays sequential (SQLite doesn't want concurrent writers, and it was
+    only ~2% of total time anyway). Verified the actual parallel
+    infrastructure for real - a genuine multi-process pool, real TCX
+    parsing across process boundaries, gzip decompression inside worker
+    processes, and graceful error handling for corrupt/unsupported files
+    without crashing the pool - but the sandbox this was built in only has
+    a single CPU core available, so the actual speedup on real multi-core
+    hardware could not be measured here and needs a real test to confirm.
+  - Timing logs from 1.12.2 are retained and extended to show the new
+    parse/save split explicitly.
+
 ## 1.12.2
 - Added detailed phase timing to the bulk import job's logs (per-file
   parsing time vs. per-file saving time, name backfill, commit, and the

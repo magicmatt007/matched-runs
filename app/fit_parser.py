@@ -19,8 +19,18 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     heart_rates = []  # per-point aligned with points, None where missing
     start_time = None
     for record in fitfile.get_messages("record"):
-        lat = record.get_value("position_lat")
-        lon = record.get_value("position_long")
+        # Building this dict once (a single pass over the record's fields)
+        # and doing plain dict lookups from here on is meaningfully faster
+        # than calling record.get_value(name) repeatedly - each of those
+        # calls does its own internal linear search through the same field
+        # list from scratch, and a typical record can easily carry a dozen
+        # or more fields (position, altitude, heart rate, cadence, speed,
+        # temperature...). For a file with thousands of GPS points, that
+        # difference compounds fast.
+        fields = {f.name: f.value for f in record}
+
+        lat = fields.get("position_lat")
+        lon = fields.get("position_long")
         if lat is None or lon is None:
             continue
         # FIT stores coordinates as 32-bit semicircles
@@ -29,12 +39,12 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         points.append((lat_deg, lon_deg))
         # "enhanced_altitude" has higher precision than plain "altitude" when
         # present; fall back to the plain field otherwise.
-        alt = record.get_value("enhanced_altitude")
+        alt = fields.get("enhanced_altitude")
         if alt is None:
-            alt = record.get_value("altitude")
+            alt = fields.get("altitude")
         altitudes.append(alt)
-        heart_rates.append(record.get_value("heart_rate"))
-        ts = record.get_value("timestamp")
+        heart_rates.append(fields.get("heart_rate"))
+        ts = fields.get("timestamp")
         if ts and start_time is None:
             start_time = ts
 
@@ -56,16 +66,18 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     calories = None
 
     for session in fitfile.get_messages("session"):
-        d = session.get_value("total_distance")
+        sfields = {f.name: f.value for f in session}
+
+        d = sfields.get("total_distance")
         if d:
             distance_m = float(d)
-        t = session.get_value("total_elapsed_time")
+        t = sfields.get("total_elapsed_time")
         if t:
             duration_s = float(t)
-        sp = session.get_value("sport")
+        sp = sfields.get("sport")
         if sp:
             sport = str(sp)
-        st = session.get_value("start_time")
+        st = sfields.get("start_time")
         if st and start_time is None:
             start_time = st
 
@@ -73,22 +85,22 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         # ascent/descent, chest strap or wrist sensor for heart rate) - more
         # reliable than anything we could derive ourselves, so prefer them
         # directly over the point-level fallback below.
-        ascent = session.get_value("total_ascent")
+        ascent = sfields.get("total_ascent")
         if ascent is not None:
             elevation_gain_m = float(ascent)
-        descent = session.get_value("total_descent")
+        descent = sfields.get("total_descent")
         if descent is not None:
             elevation_loss_m = float(descent)
-        avg_hr = session.get_value("avg_heart_rate")
+        avg_hr = sfields.get("avg_heart_rate")
         if avg_hr is not None:
             avg_heart_rate = float(avg_hr)
-        max_hr = session.get_value("max_heart_rate")
+        max_hr = sfields.get("max_heart_rate")
         if max_hr is not None:
             max_heart_rate = float(max_hr)
-        cad = session.get_value("avg_cadence")
+        cad = sfields.get("avg_cadence")
         if cad is not None:
             avg_cadence = float(cad)
-        cal = session.get_value("total_calories")
+        cal = sfields.get("total_calories")
         if cal is not None:
             calories = float(cal)
 

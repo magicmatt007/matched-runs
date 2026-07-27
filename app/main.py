@@ -6,6 +6,8 @@ import logging
 import asyncio
 import sqlite3
 import httpx
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request, UploadFile, Depends, Form, File
@@ -67,67 +69,124 @@ def _spawn_background_task(coro):
     return task
 
 
+def _parse_one_file(filename: str, content: bytes):
+    """Runs in a worker process (see MAX_PARSE_WORKERS/_run_import_sync
+    below) - pure parsing, no DB access at all, since SQLite doesn't want
+    concurrent writers and this needs to stay safely parallelizable.
+    Defined at module level (not nested) so it can be pickled and sent to
+    worker processes. Returns a dict describing what happened, never
+    raises - any parse failure is captured and reported back instead."""
+    lower_name = filename.lower()
+
+    if lower_name.endswith(".gz"):
+        try:
+            content = gzip.decompress(content)
+        except Exception as e:
+            return {"filename": filename, "status": "error", "error": f"gunzip failed: {e}", "ext": "(gz)"}
+        lower_name = lower_name[:-3]
+
+    ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
+
+    if lower_name.endswith(".fit"):
+        source, parse_fn = "fit", parse_fit_bytes
+    elif lower_name.endswith(".gpx"):
+        source, parse_fn = "gpx", parse_gpx_bytes
+    elif lower_name.endswith(".tcx"):
+        source, parse_fn = "tcx", parse_tcx_bytes
+    else:
+        return {"filename": filename, "status": "unsupported", "ext": ext}
+
+    try:
+        parsed = parse_fn(content, fallback_name=filename)
+    except Exception as e:
+        return {"filename": filename, "status": "error", "error": str(e), "ext": ext}
+
+    return {"filename": filename, "status": "ok", "source": source, "parsed": parsed, "ext": ext}
+
+
+# Parsing is CPU-bound and each file is completely independent of every
+# other - a textbook case for spreading across multiple CPU cores instead
+# of one. This was confirmed as the actual bottleneck (>95% of total
+# import time) via real timing logs, not assumed. Capped rather than using
+# every available core unconditionally, since this same code path also
+# runs on much more memory-constrained hardware (e.g. a Raspberry Pi),
+# where spawning too many worker processes at once has its own real cost.
+MAX_PARSE_WORKERS = min(os.cpu_count() or 1, 8)
+
+
 def _run_import_sync(files_data, name_overrides, job):
-    """The actual (slow, synchronous) import work: parse every file, save
-    each activity, then re-run route matching. Runs on a worker thread via
-    asyncio.to_thread - deliberately kept as plain synchronous code with no
-    async/await, since there's no natural yield point in the middle of
-    parsing a file or running the O(n^2) matching loop anyway."""
+    """The actual (slow, synchronous) import work: parse every file (in
+    parallel across worker processes), save each activity (sequentially,
+    since SQLite doesn't want concurrent writers - this part turned out to
+    be a small fraction of the total time anyway), then re-run route
+    matching. Runs on a worker thread via asyncio.to_thread."""
     db = SessionLocal()
     t_start = time.time()
-    parse_time_total = 0.0
-    save_time_total = 0.0
     try:
         added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
         seen_extensions = set()
         added_activities = []
 
-        for filename, content in files_data:
-            job["processed"] += 1
-            lower_name = filename.lower()
-
-            if lower_name.endswith(".gz"):
+        # Explicit "spawn" context rather than relying on the platform
+        # default ("fork" on Linux) - forking from a background thread
+        # while other threads/tasks may be active (this app has several,
+        # e.g. the Garmin auto-sync loop) is a well-known source of subtle
+        # deadlocks in multiprocessing, since fork() only duplicates the
+        # calling thread. Spawn starts each worker fresh instead, avoiding
+        # that class of problem entirely, at the cost of slightly slower
+        # worker startup - negligible next to the actual parsing work.
+        mp_context = multiprocessing.get_context("spawn")
+        parse_results = {}
+        t_parse_start = time.time()
+        with ProcessPoolExecutor(max_workers=MAX_PARSE_WORKERS, mp_context=mp_context) as executor:
+            futures = {executor.submit(_parse_one_file, filename, content): filename for filename, content in files_data}
+            for future in as_completed(futures):
+                filename = futures[future]
                 try:
-                    content = gzip.decompress(content)
+                    result = future.result()
                 except Exception as e:
-                    logger.warning("Failed to gunzip %s: %s", filename, e)
-                    skipped += 1
-                    continue
-                lower_name = lower_name[:-3]
+                    result = {"filename": filename, "status": "error", "error": str(e), "ext": "(none)"}
+                parse_results[filename] = result
+                job["processed"] += 1
+                if job["processed"] % 200 == 0:
+                    logger.info(
+                        "[import] parsing progress: %d/%d files, %.1fs elapsed (%d workers)",
+                        job["processed"], job["total"], time.time() - t_parse_start, MAX_PARSE_WORKERS,
+                    )
+        t_parse_done = time.time()
+        logger.info(
+            "[import] parallel parsing finished: %d files in %.1fs using up to %d workers",
+            len(files_data), t_parse_done - t_parse_start, MAX_PARSE_WORKERS,
+        )
 
-            ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
+        # Saving stays sequential and in original file order (for
+        # deterministic behavior) - this is a small fraction of total time
+        # (confirmed via earlier timing logs), and SQLite doesn't handle
+        # concurrent writers well, so there's no good reason to parallelize
+        # this part too.
+        for filename, content in files_data:
+            result = parse_results.get(filename)
+            ext = result.get("ext", "(none)") if result else "(none)"
             seen_extensions.add(ext)
 
-            t_parse_start = time.time()
-            try:
-                if lower_name.endswith(".fit"):
-                    parsed = parse_fit_bytes(content, fallback_name=filename)
-                elif lower_name.endswith(".gpx"):
-                    parsed = parse_gpx_bytes(content, fallback_name=filename)
-                elif lower_name.endswith(".tcx"):
-                    parsed = parse_tcx_bytes(content, fallback_name=filename)
-                else:
-                    unsupported_ext += 1
-                    skipped += 1
-                    continue
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", filename, e)
+            if result is None:
                 skipped += 1
                 continue
-            finally:
-                parse_time_total += time.time() - t_parse_start
+            if result["status"] == "error":
+                logger.warning("Failed to parse %s: %s", filename, result.get("error"))
+                skipped += 1
+                continue
+            if result["status"] == "unsupported":
+                unsupported_ext += 1
+                skipped += 1
+                continue
 
-            if lower_name.endswith(".gpx"):
-                source = "gpx"
-            elif lower_name.endswith(".tcx"):
-                source = "tcx"
-            else:
-                source = "fit"
+            source = result["source"]
+            parsed = result["parsed"]
 
             base_filename = filename.rsplit("/", 1)[-1].strip().lower()
             final_name = name_overrides.get(base_filename) or parsed["name"]
 
-            t_save_start = time.time()
             status, activity = _save_activity(
                 db, source=source, external_id=filename,
                 name=final_name, points=parsed["points"],
@@ -142,8 +201,6 @@ def _run_import_sync(files_data, name_overrides, job):
                 elevation_profile=parsed.get("elevation_profile"),
                 heart_rate_profile=parsed.get("heart_rate_profile"),
             )
-            save_time_total += time.time() - t_save_start
-
             if status == "added":
                 added += 1
                 added_activities.append(activity)
@@ -152,18 +209,8 @@ def _run_import_sync(files_data, name_overrides, job):
             else:
                 unchanged += 1
 
-            if job["processed"] % 200 == 0:
-                logger.info(
-                    "[import] progress: %d/%d files, %.1fs elapsed so far (parse=%.1fs, save=%.1fs)",
-                    job["processed"], job["total"], time.time() - t_start, parse_time_total, save_time_total,
-                )
-
-        t_loop_done = time.time()
-        logger.info(
-            "[import] per-file loop finished: %d files in %.1fs (parse=%.1fs, save=%.1fs, other overhead=%.1fs)",
-            len(files_data), t_loop_done - t_start, parse_time_total, save_time_total,
-            (t_loop_done - t_start) - parse_time_total - save_time_total,
-        )
+        t_save_done = time.time()
+        logger.info("[import] sequential save phase finished in %.1fs", t_save_done - t_parse_done)
 
         # Backfill names on already-imported activities too, in case
         # activities.csv was uploaded separately from (before or after) the
@@ -177,7 +224,7 @@ def _run_import_sync(files_data, name_overrides, job):
                     updated += 1
         t_backfill_done = time.time()
         if name_overrides:
-            logger.info("[import] name backfill finished in %.1fs", t_backfill_done - t_loop_done)
+            logger.info("[import] name backfill finished in %.1fs", t_backfill_done - t_save_done)
 
         db.flush()
         added_ids = [a.id for a in added_activities]
@@ -216,9 +263,9 @@ def _run_import_sync(files_data, name_overrides, job):
         logger.info("[import] matching phase (%s) finished in %.1fs", match_mode, t_match_done - t_match_start)
 
         logger.info(
-            "[import] TOTAL: %.1fs (per-file loop=%.1fs, backfill=%.1fs, commit=%.1fs, matching=%.1fs)",
-            time.time() - t_start, t_loop_done - t_start, t_backfill_done - t_loop_done,
-            t_commit_done - t_backfill_done, t_match_done - t_match_start,
+            "[import] TOTAL: %.1fs (parse=%.1fs, save=%.1fs, backfill=%.1fs, commit=%.1fs, matching=%.1fs)",
+            time.time() - t_start, t_parse_done - t_parse_start, t_save_done - t_parse_done,
+            t_backfill_done - t_save_done, t_commit_done - t_backfill_done, t_match_done - t_match_start,
         )
         logger.info(
             "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
