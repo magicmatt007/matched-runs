@@ -1,5 +1,5 @@
 name: "Matched Runs"
-version: "1.10.3"
+version: "1.11.0"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -
@@ -36,13 +36,16 @@ webui: "http://[HOST]:[PORT:8000]/"
 # this app already uses /data for its SQLite database, so no extra `map`
 # entry is needed for that. Nothing else outside the container is required.
 
-options: {}
+options:
+  garmin_sync_interval_minutes: 60
+  match_distance_threshold_m: 85
+  match_length_tolerance: 0.15
 schema:
   garmin_email: "str?"
   garmin_password: "password?"
-  garmin_sync_interval_minutes: "int?"
+  garmin_sync_interval_minutes: "int"
   strava_client_id: "str?"
   strava_client_secret: "str?"
   strava_redirect_uri: "url?"
-  match_distance_threshold_m: "int?"
-  match_length_tolerance: "float?"
+  match_distance_threshold_m: "int"
+  match_length_tolerance: "float"

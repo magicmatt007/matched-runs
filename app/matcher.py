@@ -22,7 +22,7 @@ from app.models import Activity, RouteGroup
 
 RESAMPLE_POINTS = 40
 
-MATCH_DISTANCE_THRESHOLD_M = float(os.environ.get("MATCH_DISTANCE_THRESHOLD_M", 50))
+MATCH_DISTANCE_THRESHOLD_M = float(os.environ.get("MATCH_DISTANCE_THRESHOLD_M", 85))
 MATCH_LENGTH_TOLERANCE = float(os.environ.get("MATCH_LENGTH_TOLERANCE", 0.15))
 
 # When the same real-world activity gets imported from more than one source

@@ -5,6 +5,7 @@ import gzip
 import logging
 import asyncio
 import sqlite3
+import httpx
 from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Request, UploadFile, Depends, Form, File
@@ -33,7 +34,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-GARMIN_SYNC_INTERVAL_MINUTES = int(os.environ.get("GARMIN_SYNC_INTERVAL_MINUTES", 120))
+GARMIN_SYNC_INTERVAL_MINUTES = int(os.environ.get("GARMIN_SYNC_INTERVAL_MINUTES", 60))
 
 Base.metadata.create_all(bind=engine)
 run_migrations()
@@ -363,6 +364,7 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "import_job": _current_import_job,
         "garmin_sync_job": _current_garmin_sync_job,
         "db_import_job": _current_db_import_job,
+        "rename_job": _current_rename_job,
     })
 
 
@@ -1303,6 +1305,142 @@ async def import_db(request: Request):
 @app.get("/manage/db-import-status")
 def db_import_status():
     return _current_db_import_job
+
+
+# ---------------- Rename activities by city ----------------
+# Reverse-geocodes each activity's start point via OpenStreetMap's Nominatim
+# service (the same data source already used for the map tiles) and renames
+# it to "{City} {Activity Type}", e.g. "Zurich Running".
+
+_geocode_cache = {}  # {(lat_rounded, lon_rounded): city_or_None} - persists
+                      # for the app's lifetime, not just one rename run, since
+                      # coordinates rarely change and this avoids re-querying
+                      # Nominatim again on a future re-run of the same action.
+_last_geocode_request_time = [0.0]  # mutable single-element list so the
+                                     # inner function can update it (no
+                                     # `nonlocal`/global juggling needed)
+
+NOMINATIM_USER_AGENT = "MatchedRunsApp/1.0 (self-hosted personal use)"
+
+
+def _reverse_geocode_city(lat: float, lon: float):
+    """Returns a city-like name for a coordinate, or None if geocoding
+    failed or no suitable name was found. Cached by coordinates rounded to
+    3 decimal places (~100m) - many activities on the same route share
+    nearly identical start points, so this avoids hitting Nominatim
+    repeatedly for what's effectively the same location.
+
+    Enforces Nominatim's usage policy of max 1 request/second by sleeping
+    as needed before any actual network call (never for a cache hit)."""
+    key = (round(lat, 3), round(lon, 3))
+    if key in _geocode_cache:
+        return _geocode_cache[key]
+
+    elapsed = time.time() - _last_geocode_request_time[0]
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+
+    city = None
+    try:
+        resp = httpx.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 14, "addressdetails": 1},
+            headers={"User-Agent": NOMINATIM_USER_AGENT},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        address = resp.json().get("address", {})
+        # Try progressively broader place types - not every location has
+        # an actual "city" tag (e.g. a trailhead in the middle of nowhere).
+        city = (
+            address.get("city") or address.get("town") or address.get("village")
+            or address.get("municipality") or address.get("suburb") or address.get("county")
+        )
+    except Exception as e:
+        logger.warning("Reverse geocoding failed for (%s, %s): %s", lat, lon, e)
+    finally:
+        _last_geocode_request_time[0] = time.time()
+
+    _geocode_cache[key] = city
+    return city
+
+
+_current_rename_job = {"active": False}
+
+
+def _run_rename_activities_sync(job):
+    """Runs on a background thread - renaming can genuinely take a while
+    for many activities at different locations, since Nominatim's usage
+    policy caps requests at 1/second. Renaming doesn't change any route
+    geometry, so there's no need to re-run matching afterward."""
+    db = SessionLocal()
+    try:
+        all_activities = db.query(Activity).all()
+        geocodable = [a for a in all_activities if a.full_points]
+        skipped_no_gps = len(all_activities) - len(geocodable)
+
+        job["phase"] = "renaming"
+        job["total"] = len(geocodable)
+        job["processed"] = 0
+        job["renamed"] = 0
+        job["failed"] = 0
+        job["skipped_no_gps"] = skipped_no_gps
+
+        for act in geocodable:
+            job["processed"] += 1
+            lat, lon = act.full_points[0]
+            city = _reverse_geocode_city(lat, lon)
+            if city:
+                new_name = f"{city} {act.activity_type}"
+                if act.name != new_name:
+                    act.name = new_name
+                    job["renamed"] += 1
+            else:
+                job["failed"] += 1
+
+            if job["processed"] % 20 == 0:
+                db.commit()  # periodic commit - keeps progress if interrupted, avoids one giant transaction
+
+        db.commit()
+        job["phase"] = "done"
+    except Exception as e:
+        logger.exception("Rename activities job failed")
+        job["phase"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["active"] = False
+        db.close()
+
+
+@app.post("/rename-activities")
+async def rename_activities_route(request: Request):
+    if _current_rename_job.get("active"):
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>A rename job is already running. Check the Import &amp; "
+            "Sync page for its progress.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=409,
+        )
+    _current_rename_job.clear()
+    _current_rename_job.update({
+        "active": True,
+        "phase": "renaming",
+        "processed": 0,
+        "total": 0,
+        "renamed": 0,
+        "failed": 0,
+        "skipped_no_gps": 0,
+        "started_at": time.time(),
+        "error": None,
+    })
+    _spawn_background_task(asyncio.to_thread(_run_rename_activities_sync, _current_rename_job))
+    return local_redirect(request, "/manage")
+
+
+@app.get("/manage/rename-status")
+def rename_status():
+    return _current_rename_job
 
 
 # ---------------- Strava OAuth + sync ----------------

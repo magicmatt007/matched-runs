@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.11.0
+- Training Log's distance chart y-axis now shows whole numbers only, no
+  "km" suffix cluttering every tick label (unit moved to the chart title
+  instead: "Distance (km)").
+- New "Rename all activities by city" button on Import & Sync, renaming
+  every activity to "[City] [Activity Type]" (e.g. "Zurich Running") based
+  on its GPS start point, via OpenStreetMap's free Nominatim geocoding
+  service (same data source already used for the map tiles). Runs as a
+  background job with the same progress-bar/ETA treatment as the other
+  slow actions, since Nominatim's usage policy caps lookups at ~1/second -
+  results are cached by location, so re-running this later (e.g. after a
+  new import) only needs to look up genuinely new locations. Indoor
+  activities with no GPS track are left untouched. Verified the caching,
+  the location-field fallback chain (city → town → village → municipality
+  → suburb → county), the 1-request/second rate limiting, and graceful
+  handling of failed/unmatched lookups against a mocked geocoding service
+  before wiring it up for real.
+- Activity detail pages now show distance/duration/pace as prominent stat
+  cards (matching the treatment elevation/heart rate/etc already had),
+  instead of small dimmed text easy to miss. The date/type/source line and
+  match-status line also switched from dimmed "muted" styling to normal
+  text.
+- Home Assistant install defaults changed: GARMIN_SYNC_INTERVAL_MINUTES
+  60 (was 120), MATCH_DISTANCE_THRESHOLD_M 85 (was 50),
+  MATCH_LENGTH_TOLERANCE unchanged at 0.15. These three are now mandatory
+  in Home Assistant's configuration screen (no longer optional/hidden) with
+  their actual default values shown, rather than silently falling back to
+  a hardcoded value the Supervisor's config screen never surfaced. The
+  same defaults apply to a standalone docker-compose install too, for
+  consistency between the two deployment methods.
+
 ## 1.10.3
 - Training Log's distance chart now rotates its x-axis date labels 90
   degrees instead of skipping most of them on narrow screens - rotated

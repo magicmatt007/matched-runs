@@ -121,7 +121,26 @@
         got logged under different labels depending on which watch was in
         use at the time. Only activities before the date you pick are
         touched; anything after is left as-is.</p>
+
+    <form action="{{ base_path }}/rename-activities" method="post" class="row" style="margin-top: 10px;"
+          data-confirm="This renames EVERY activity to '[City] [Activity Type]' (e.g. 'Zurich Running'), overwriting current names. Continue?">
+        <button type="submit" class="secondary">Rename all activities by city</button>
+    </form>
+    <p class="muted" style="margin-top: 4px;">Renames every activity to
+        "[City] [Activity Type]" using its start location (e.g. "Zurich
+        Running"), looked up via OpenStreetMap's free geocoding service.
+        That service limits lookups to about one per second, so this can
+        take a while for a large history - progress is shown below once
+        started. Activities at the same location only need one lookup, so
+        it's much faster after the first run. Indoor activities with no GPS
+        track are left untouched.</p>
+
     <p class="muted">{{ total_activities }} activities imported.</p>
+</section>
+
+<section class="panel" id="rename-progress-panel" style="display:none;">
+    <h2>Rename progress</h2>
+    <div id="rename-progress-content"></div>
 </section>
 
 <section class="panel">
@@ -415,6 +434,50 @@
         renderServerJob(initialJob);
         if (initialJob && initialJob.active) {
             pollTimer = setInterval(pollServerStatus, 1000);
+        }
+    })();
+
+    // --- Rename-by-city progress ---
+    (function () {
+        var panel = document.getElementById('rename-progress-panel');
+        var content = document.getElementById('rename-progress-content');
+        var pollTimer = null;
+
+        function render(job) {
+            if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+
+            if (job.phase === 'renaming') {
+                var frac = job.total > 0 ? job.processed / job.total : 0;
+                content.innerHTML = job.total > 0
+                    ? '<p>Renaming: ' + job.processed + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine('Getting started');
+            } else if (job.phase === 'done') {
+                content.innerHTML =
+                    '<p><strong>' + job.renamed + '</strong> renamed, ' +
+                    '<strong>' + job.failed + '</strong> could not be located' +
+                    (job.skipped_no_gps ? ', <strong>' + job.skipped_no_gps + '</strong> skipped (no GPS track)' : '') + '.</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            } else if (job.phase === 'error') {
+                content.innerHTML = '<p style="color:#e6194b;">Rename failed: ' + job.error + '</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
+        }
+
+        function poll() {
+            fetch('{{ base_path }}/manage/rename-status')
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () { /* transient network hiccup - next poll will retry */ });
+        }
+
+        var initialJob = {{ rename_job | tojson }};
+        render(initialJob);
+        if (initialJob && initialJob.active) {
+            pollTimer = setInterval(poll, 1000);
         }
     })();
 })();

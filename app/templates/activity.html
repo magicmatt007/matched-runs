@@ -13,20 +13,33 @@
     {% endif %}
 </div>
 <h2>{{ activity.name }}</h2>
-<p class="muted">
+<p>
     {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
     &middot; {{ activity.activity_type }}
-    &middot; {{ "%.2f"|format(activity.distance_m / 1000) }} km
-    &middot; {{ activity.duration_s | hms }}
-    &middot; {{ activity | pace }}
-    &middot; {{ activity.source }}
+    &middot; via {{ activity.source }}
 </p>
+
+<div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Distance</div>
+        <div style="font-size: 1.6rem; font-weight: 700;">{{ "%.2f"|format(activity.distance_m / 1000) }} km</div>
+    </div>
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Duration</div>
+        <div style="font-size: 1.6rem; font-weight: 700;">{{ activity.duration_s | hms }}</div>
+    </div>
+    <div class="panel" style="flex: 1; min-width: 120px; text-align: center;">
+        <div class="muted">Pace</div>
+        <div style="font-size: 1.6rem; font-weight: 700;">{{ activity | pace }}</div>
+    </div>
+</div>
+
 {% if activity.group_id %}
 <p><a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ (group_count or 1) - 1 }} other matched run(s) on this route &rarr;</a></p>
 {% elif activity.full_points %}
-<p class="muted">No matches found yet for this route.</p>
+<p>No matches found yet for this route.</p>
 {% else %}
-<p class="muted">No GPS track, so this activity can't be route-matched.</p>
+<p>No GPS track, so this activity can't be route-matched.</p>
 {% endif %}
 
 {% if activity.elevation_gain_m is not none or activity.elevation_loss_m is not none

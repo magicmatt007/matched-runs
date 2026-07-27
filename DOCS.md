@@ -46,3 +46,21 @@ However, two things need the app's direct port instead:
 
 If you don't need either of those, you can ignore this and close the
 direct port.
+
+## Rename activities by city
+
+Import & Sync has a "Rename all activities by city" button, which renames
+every activity to "[City] [Activity Type]" (e.g. "Zurich Running") based on
+its GPS start point. This looks up each location via OpenStreetMap's free
+Nominatim geocoding service, which means:
+
+- The app needs outbound internet access to `nominatim.openstreetmap.org`
+  (it already needs this for the OpenStreetMap map tiles, so this isn't a
+  new type of requirement, just a different destination).
+- Nominatim's usage policy caps lookups at roughly one per second, so this
+  can take a while for a large history - a progress bar with an ETA is
+  shown once started. Activities that share a location (e.g. many runs of
+  the same route) only need one lookup between them, so this is much
+  faster on a re-run than the first time.
+- Indoor activities with no GPS track are left untouched, since there's no
+  location to look up.
