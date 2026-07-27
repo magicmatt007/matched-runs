@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.11.1
+- Fixed the Training Log distance chart's y-axis not actually using the
+  space freed up by shortening its labels (whole numbers, no "km") -
+  the left margin reserved for those labels was untouched, so the plot
+  area, and the room available for x-axis labels, never grew. Shrunk that
+  margin to match the now-much-shorter labels.
+- The 1-year view's x-axis (always exactly 12 short month labels) no
+  longer skips any of them regardless of screen width - previously it
+  used the same adaptive width-based logic as the daily views, which on a
+  narrow phone was still dropping half the months even after the above
+  fix. Since there are never more than 12 of these short labels, there's
+  no good reason to ever hide any.
+
 ## 1.11.0
 - Training Log's distance chart y-axis now shows whole numbers only, no
   "km" suffix cluttering every tick label (unit moved to the chart title

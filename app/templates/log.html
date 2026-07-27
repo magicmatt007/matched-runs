@@ -132,7 +132,7 @@
     // More bottom padding than before - the x-axis labels are rotated 90
     // degrees below (see the loop further down), so they now need vertical
     // room roughly equal to their text length instead of their height.
-    var padding = { top: 16, right: 16, bottom: 70, left: 60 };
+    var padding = { top: 16, right: 16, bottom: 70, left: 34 };
     var plotW = width - padding.left - padding.right;
     var plotH = height - padding.top - padding.bottom;
 
@@ -163,9 +163,13 @@
     // worth of horizontal space (not its full text width), so far more
     // labels fit before any need to be skipped - especially valuable on a
     // narrow phone screen, which is exactly where skipping was worst.
-    var pxPerLabel = 22;
+    // The 1-year view is always exactly 12 short (3-letter) month labels -
+    // never skip any of those, regardless of width; only the daily-
+    // granularity views (7d/4w/month drill-down, which can have far more
+    // labels than reasonably fit) use the adaptive width-based skipping.
+    var pxPerLabel = 28;
     var maxLabels = Math.max(1, Math.floor(plotW / pxPerLabel));
-    var labelStep = Math.ceil(data.length / maxLabels) || 1;
+    var labelStep = data.length <= 12 ? 1 : (Math.ceil(data.length / maxLabels) || 1);
 
     data.forEach(function (d, i) {
         var x = padding.left + i * barSlot;
