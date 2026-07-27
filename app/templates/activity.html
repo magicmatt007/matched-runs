@@ -104,4 +104,82 @@ map.fitBounds(line.getBounds());
 </div>
 {% endif %}
 
+{% if elevation_chart_data %}
+<div class="panel">
+    <h3 style="margin-top:0;">Elevation (m)</h3>
+    <div id="elevation-chart"></div>
+</div>
+{% endif %}
+
+{% if heart_rate_chart_data %}
+<div class="panel">
+    <h3 style="margin-top:0;">Heart Rate (bpm)</h3>
+    <div id="heart-rate-chart"></div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+    // Shared renderer for both charts below - a simple line chart over the
+    // course of the activity (x-axis = position in the recorded track,
+    // not calibrated to exact distance/time). Skips any null readings by
+    // connecting straight across the gap, rather than breaking the line -
+    // fine for the odd missing point, which is the common case.
+    function renderLineChart(containerId, data, color, label) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+
+        var validValues = (data || []).filter(function (v) { return v !== null && v !== undefined; });
+        if (validValues.length < 2) {
+            var article = /^[aeiou]/i.test(label) ? 'an' : 'a';
+            container.innerHTML = '<p class="muted">Not enough data for ' + article + ' ' + label.toLowerCase() + ' chart.</p>';
+            return;
+        }
+
+        var width = container.clientWidth || 800;
+        var height = 180;
+        var padding = { top: 16, right: 16, bottom: 16, left: 44 };
+        var plotW = width - padding.left - padding.right;
+        var plotH = height - padding.top - padding.bottom;
+
+        var minV = Math.min.apply(null, validValues);
+        var maxV = Math.max.apply(null, validValues);
+        if (minV === maxV) { minV -= 1; maxV += 1; }
+        var pad = (maxV - minV) * 0.1;
+        minV -= pad;
+        maxV += pad;
+
+        function xFor(i) {
+            return padding.left + (i / (data.length - 1)) * plotW;
+        }
+        function yFor(v) {
+            return padding.top + plotH - ((v - minV) / (maxV - minV)) * plotH;
+        }
+
+        var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%; height:' + height + 'px;">';
+
+        var tickCount = 3;
+        for (var t = 0; t <= tickCount; t++) {
+            var val = minV + (t / tickCount) * (maxV - minV);
+            var y = yFor(val);
+            svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
+            svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + Math.round(val) + '</text>';
+        }
+
+        var linePoints = [];
+        data.forEach(function (v, i) {
+            if (v === null || v === undefined) return;
+            linePoints.push(xFor(i) + ',' + yFor(v));
+        });
+        svg += '<polyline points="' + linePoints.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="2" />';
+
+        svg += '</svg>';
+        container.innerHTML = svg;
+    }
+
+    renderLineChart('elevation-chart', {{ elevation_chart_data | tojson }}, '#3cb44b', 'Elevation');
+    renderLineChart('heart-rate-chart', {{ heart_rate_chart_data | tojson }}, '#e6194b', 'Heart Rate');
+})();
+</script>
+
 {% endblock %}

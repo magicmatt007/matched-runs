@@ -33,7 +33,8 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
 
     points = []
     altitudes = []
-    heart_rates = []
+    heart_rates = []  # flat list of every HR reading found, for avg/max summary stats
+    heart_rate_series = []  # per-point aligned with points/altitudes, for the chart
     cadences = []
     start_time = None
     last_distance = None
@@ -41,7 +42,7 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     for tp in root.iter():
         if _local(tp.tag) != "Trackpoint":
             continue
-        lat = lon = time_val = dist_val = alt_val = None
+        lat = lon = time_val = dist_val = alt_val = point_hr = None
         for child in tp:
             name = _local(child.tag)
             if name == "Position":
@@ -67,7 +68,8 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
                 for hc in child:
                     if _local(hc.tag) == "Value" and hc.text:
                         try:
-                            heart_rates.append(float(hc.text))
+                            point_hr = float(hc.text)
+                            heart_rates.append(point_hr)
                         except ValueError:
                             pass
 
@@ -100,6 +102,7 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
             continue
         points.append((lat, lon))
         altitudes.append(alt_val)
+        heart_rate_series.append(point_hr)
 
     duration_s = None
     total_lap_time = 0.0
@@ -204,4 +207,6 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
         "max_heart_rate": max_heart_rate,
         "avg_cadence": (sum(cadences) / len(cadences)) if cadences else None,
         "calories": total_calories if found_calories else None,
+        "elevation_profile": altitudes if any(a is not None for a in altitudes) else None,
+        "heart_rate_profile": heart_rate_series if any(h is not None for h in heart_rate_series) else None,
     }

@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.12.2
+- Added detailed phase timing to the bulk import job's logs (per-file
+  parsing time vs. per-file saving time, name backfill, commit, and the
+  route-matching phase, each logged separately with a running progress
+  log every 200 files) - in response to a report that a 2000-activity
+  Strava import now takes noticeably longer than it seemed to before.
+  Several real candidates exist (parsers now extract more per-point data,
+  every new activity runs a cross-source duplicate check against the
+  database, and a large import triggers the O(n^2) full route-matching
+  rebuild), but rather than guess which one actually dominates - the same
+  mistake made repeatedly during the database import investigation before
+  real log data settled it - this adds the instrumentation first. Not a
+  performance fix yet; the next step is re-running a comparably large
+  import and reading the logs.
+
+## 1.12.1
+- Corrected an inaccurate claim from 1.12.0: Garmin live sync actually
+  *can* populate the new elevation/heart rate charts - it already
+  downloads and parses a full GPX file per activity (not just a summary
+  API call), and that parser already extracts per-point elevation/heart
+  rate. The data was available all along; it just wasn't being passed
+  through to storage. Fixed the oversight, and confirmed via independent
+  sources that Garmin Connect's GPX export does include barometric
+  elevation and heart-rate sensor data (cadence and power genuinely aren't
+  in GPX, which matches why cadence already came from Garmin's summary API
+  field rather than the file).
+  Strava sync remains genuinely unable to populate these charts without a
+  bigger integration change - it only ever decodes a summary polyline
+  (lat/lon only, no elevation/HR possible), and getting per-point data
+  would mean calling Strava's separate activity-streams endpoint with an
+  extra API call per activity, on an integration already de-prioritized in
+  this app since Strava's API now requires a paid tier.
+
+## 1.12.0
+- Activity detail pages now show elevation and heart rate charts over the
+  course of the activity, alongside the existing summary stats (gain/loss,
+  avg/max). This required storing per-point elevation/heart-rate series
+  for the first time - previously only summary totals were kept, the raw
+  per-point readings were computed then discarded. Each is downsampled to
+  at most 150 points for a lightweight chart even on a multi-thousand-point
+  GPS track, and gracefully falls back to a "not enough data" message
+  rather than showing an empty/broken chart when a source doesn't have
+  this data.
+  - Only file-based imports (GPX/FIT/TCX) populate these charts - Garmin/
+    Strava live sync only exposes summary totals from the endpoints this
+    app calls, not a per-point series. Existing already-imported activities
+    won't show these charts until re-uploaded/re-synced (same as previous
+    metadata-only fields).
+  - Found and fixed a real per-point misalignment bug in the TCX parser
+    while building this: heart rate readings were being collected into a
+    flat list whenever found, independent of whether that trackpoint later
+    turned out to have no GPS position and got skipped entirely - meaning
+    the heart rate series could end up silently offset from the points/
+    elevation arrays it needs to line up with. Restructured to build the
+    per-point-aligned series at the same point a trackpoint is kept or
+    discarded, and verified the fix with a synthetic file containing both
+    a missing HR reading and a trackpoint with no position at all.
+  - Caught a real startup-crashing bug (the same class as 1.10.1's) while
+    building the route logic - a decorator ended up separated from the
+    function it was meant to register by newly-inserted code in between.
+    The `ast`-based route/decorator safety check added after 1.10.1 caught
+    it immediately, before it ever left this session.
+
 ## 1.11.1
 - Fixed the Training Log distance chart's y-axis not actually using the
   space freed up by shortening its labels (whole numbers, no "km") -

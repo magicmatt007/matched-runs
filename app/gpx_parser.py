@@ -22,7 +22,10 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
 
     points = []
     elevations = []
-    heart_rates = []
+    # Per-point aligned (one entry per point, None where missing) - used
+    # for both the summary avg/max stats and the activity detail page's
+    # heart rate chart, which needs to know WHICH points had a reading.
+    heart_rate_series = []
     cadences = []
     start_time = None
     for track in gpx.tracks:
@@ -32,16 +35,18 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
                 elevations.append(p.elevation)
                 if p.time and start_time is None:
                     start_time = p.time
+
                 # Best-effort: Garmin's TrackPointExtension (gpxtpx:hr /
                 # gpxtpx:cad) isn't a standard GPX field - only present if
                 # the exporting device/app included it, so this won't find
                 # anything on every GPX file.
+                point_hr = None
                 for ext in (p.extensions or []):
                     for child in ext.iter():
                         tag = _local_tag(child.tag)
                         if tag == "hr" and child.text:
                             try:
-                                heart_rates.append(float(child.text))
+                                point_hr = float(child.text)
                             except ValueError:
                                 pass
                         elif tag == "cad" and child.text:
@@ -49,6 +54,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
                                 cadences.append(float(child.text))
                             except ValueError:
                                 pass
+                heart_rate_series.append(point_hr)
 
     # Some GPX exports (e.g. routes without tracks) use routes instead
     if not points:
@@ -56,6 +62,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
             for p in route.points:
                 points.append((p.latitude, p.longitude))
                 elevations.append(p.elevation)
+                heart_rate_series.append(None)
 
     # No raise here for an empty points list - see fit_parser.py for why
     # (indoor activities are still worth importing without a route).
@@ -88,6 +95,8 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
 
     elevation_gain_m, elevation_loss_m = gain_loss_from_elevations(elevations)
 
+    hr_values = [h for h in heart_rate_series if h is not None]
+
     return {
         "name": name,
         "activity_type": activity_type,
@@ -97,8 +106,13 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
         "start_time": start_time,
         "elevation_gain_m": elevation_gain_m,
         "elevation_loss_m": elevation_loss_m,
-        "avg_heart_rate": (sum(heart_rates) / len(heart_rates)) if heart_rates else None,
-        "max_heart_rate": max(heart_rates) if heart_rates else None,
+        "avg_heart_rate": (sum(hr_values) / len(hr_values)) if hr_values else None,
+        "max_heart_rate": max(hr_values) if hr_values else None,
         "avg_cadence": (sum(cadences) / len(cadences)) if cadences else None,
         "calories": None,  # not a standard/common GPX extension field
+        # None if literally no point ever had a reading, rather than a
+        # list of all-None values - lets the caller skip storing/charting
+        # it entirely when the data was never present at all.
+        "elevation_profile": elevations if any(e is not None for e in elevations) else None,
+        "heart_rate_profile": heart_rate_series if hr_values else None,
     }

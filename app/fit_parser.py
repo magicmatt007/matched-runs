@@ -16,6 +16,7 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
 
     points = []
     altitudes = []
+    heart_rates = []  # per-point aligned with points, None where missing
     start_time = None
     for record in fitfile.get_messages("record"):
         lat = record.get_value("position_lat")
@@ -32,6 +33,7 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         if alt is None:
             alt = record.get_value("altitude")
         altitudes.append(alt)
+        heart_rates.append(record.get_value("heart_rate"))
         ts = record.get_value("timestamp")
         if ts and start_time is None:
             start_time = ts
@@ -106,6 +108,8 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
+    hr_values = [h for h in heart_rates if h is not None]
+
     return {
         "name": name,
         "activity_type": activity_type,
@@ -119,4 +123,6 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         "max_heart_rate": max_heart_rate,
         "avg_cadence": avg_cadence,
         "calories": calories,
+        "elevation_profile": altitudes if any(a is not None for a in altitudes) else None,
+        "heart_rate_profile": heart_rates if hr_values else None,
     }

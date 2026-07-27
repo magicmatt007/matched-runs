@@ -51,5 +51,7 @@ def run_migrations():
     ensure_column("activities", "max_heart_rate", "FLOAT")
     ensure_column("activities", "avg_cadence", "FLOAT")
     ensure_column("activities", "calories", "FLOAT")
+    ensure_column("activities", "elevation_profile_json", "TEXT")
+    ensure_column("activities", "heart_rate_profile_json", "TEXT")
 
     conn.close()

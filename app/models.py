@@ -43,6 +43,15 @@ class Activity(Base):
     # Resampled fixed-length points used for matching, JSON list of [lat, lon]
     resampled_points_json = Column(Text, nullable=False)
 
+    # Per-point series aligned with full_points (same length, null entries
+    # where that point had no reading) - used for the elevation/heart rate
+    # charts on the activity detail page. Only file-based imports (GPX/FIT/
+    # TCX) currently populate these; Garmin/Strava live sync only exposes
+    # summary totals (elevation_gain_m etc. above), not a per-point series,
+    # from the endpoints this app calls.
+    elevation_profile_json = Column(Text, nullable=True)
+    heart_rate_profile_json = Column(Text, nullable=True)
+
     group_id = Column(Integer, ForeignKey("route_groups.id"), nullable=True)
     group = relationship("RouteGroup", back_populates="activities")
 
@@ -55,6 +64,14 @@ class Activity(Base):
     @property
     def resampled_points(self):
         return json.loads(self.resampled_points_json)
+
+    @property
+    def elevation_profile(self):
+        return json.loads(self.elevation_profile_json) if self.elevation_profile_json else None
+
+    @property
+    def heart_rate_profile(self):
+        return json.loads(self.heart_rate_profile_json) if self.heart_rate_profile_json else None
 
 
 class StravaToken(Base):

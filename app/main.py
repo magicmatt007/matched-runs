@@ -74,6 +74,9 @@ def _run_import_sync(files_data, name_overrides, job):
     async/await, since there's no natural yield point in the middle of
     parsing a file or running the O(n^2) matching loop anyway."""
     db = SessionLocal()
+    t_start = time.time()
+    parse_time_total = 0.0
+    save_time_total = 0.0
     try:
         added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
         seen_extensions = set()
@@ -95,6 +98,7 @@ def _run_import_sync(files_data, name_overrides, job):
             ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
             seen_extensions.add(ext)
 
+            t_parse_start = time.time()
             try:
                 if lower_name.endswith(".fit"):
                     parsed = parse_fit_bytes(content, fallback_name=filename)
@@ -110,6 +114,8 @@ def _run_import_sync(files_data, name_overrides, job):
                 logger.warning("Failed to parse %s: %s", filename, e)
                 skipped += 1
                 continue
+            finally:
+                parse_time_total += time.time() - t_parse_start
 
             if lower_name.endswith(".gpx"):
                 source = "gpx"
@@ -121,6 +127,7 @@ def _run_import_sync(files_data, name_overrides, job):
             base_filename = filename.rsplit("/", 1)[-1].strip().lower()
             final_name = name_overrides.get(base_filename) or parsed["name"]
 
+            t_save_start = time.time()
             status, activity = _save_activity(
                 db, source=source, external_id=filename,
                 name=final_name, points=parsed["points"],
@@ -132,7 +139,11 @@ def _run_import_sync(files_data, name_overrides, job):
                 max_heart_rate=parsed.get("max_heart_rate"),
                 avg_cadence=parsed.get("avg_cadence"),
                 calories=parsed.get("calories"),
+                elevation_profile=parsed.get("elevation_profile"),
+                heart_rate_profile=parsed.get("heart_rate_profile"),
             )
+            save_time_total += time.time() - t_save_start
+
             if status == "added":
                 added += 1
                 added_activities.append(activity)
@@ -140,6 +151,19 @@ def _run_import_sync(files_data, name_overrides, job):
                 updated += 1
             else:
                 unchanged += 1
+
+            if job["processed"] % 200 == 0:
+                logger.info(
+                    "[import] progress: %d/%d files, %.1fs elapsed so far (parse=%.1fs, save=%.1fs)",
+                    job["processed"], job["total"], time.time() - t_start, parse_time_total, save_time_total,
+                )
+
+        t_loop_done = time.time()
+        logger.info(
+            "[import] per-file loop finished: %d files in %.1fs (parse=%.1fs, save=%.1fs, other overhead=%.1fs)",
+            len(files_data), t_loop_done - t_start, parse_time_total, save_time_total,
+            (t_loop_done - t_start) - parse_time_total - save_time_total,
+        )
 
         # Backfill names on already-imported activities too, in case
         # activities.csv was uploaded separately from (before or after) the
@@ -151,10 +175,15 @@ def _run_import_sync(files_data, name_overrides, job):
                 if better_name and act.name != better_name:
                     act.name = better_name
                     updated += 1
+        t_backfill_done = time.time()
+        if name_overrides:
+            logger.info("[import] name backfill finished in %.1fs", t_backfill_done - t_loop_done)
 
         db.flush()
         added_ids = [a.id for a in added_activities]
         db.commit()
+        t_commit_done = time.time()
+        logger.info("[import] commit finished in %.1fs", t_commit_done - t_backfill_done)
 
         job["phase"] = "matching"
         job["match_done"] = 0
@@ -164,21 +193,33 @@ def _run_import_sync(files_data, name_overrides, job):
             job["match_done"] = done
             job["match_total"] = total
 
+        t_match_start = time.time()
+        match_mode = "skipped"
         if updated:
             # A metadata-only update (name/type backfill) doesn't need
             # re-matching, but a cross-source-duplicate merge DOES change an
             # activity's geometry - play it safe with a full rebuild
             # whenever any update happened at all.
+            match_mode = "full_rebuild (triggered by updates)"
             rebuild_groups(db, progress_callback=report_match_progress)
         elif added_ids:
             if len(added_ids) > 20:
                 # A big bulk import has enough new activities that
                 # comparing each one against everything isn't meaningfully
                 # cheaper than a full rebuild.
+                match_mode = "full_rebuild (>20 new activities)"
                 rebuild_groups(db, progress_callback=report_match_progress)
             else:
+                match_mode = "incremental"
                 incremental_rebuild_groups(db, added_ids)
+        t_match_done = time.time()
+        logger.info("[import] matching phase (%s) finished in %.1fs", match_mode, t_match_done - t_match_start)
 
+        logger.info(
+            "[import] TOTAL: %.1fs (per-file loop=%.1fs, backfill=%.1fs, commit=%.1fs, matching=%.1fs)",
+            time.time() - t_start, t_loop_done - t_start, t_backfill_done - t_loop_done,
+            t_commit_done - t_backfill_done, t_match_done - t_match_start,
+        )
         logger.info(
             "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
             added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
@@ -218,7 +259,8 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     points, distance_m: float, duration_s, start_time,
                     activity_type: str = None, elevation_gain_m=None,
                     elevation_loss_m=None, avg_heart_rate=None,
-                    max_heart_rate=None, avg_cadence=None, calories=None):
+                    max_heart_rate=None, avg_cadence=None, calories=None,
+                    elevation_profile=None, heart_rate_profile=None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
@@ -231,6 +273,10 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         "avg_cadence": avg_cadence,
         "calories": calories,
     }
+    # Stored as JSON text, so encoded once here rather than repeating the
+    # same json.dumps(...) at each of the three places these get written.
+    elevation_profile_json = json.dumps(elevation_profile) if elevation_profile is not None else None
+    heart_rate_profile_json = json.dumps(heart_rate_profile) if heart_rate_profile is not None else None
 
     if existing:
         # Re-imported (e.g. re-uploading the same export after an app update
@@ -249,6 +295,12 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             if value is not None and getattr(existing, field) != value:
                 setattr(existing, field, value)
                 changed = True
+        if elevation_profile_json is not None and existing.elevation_profile_json != elevation_profile_json:
+            existing.elevation_profile_json = elevation_profile_json
+            changed = True
+        if heart_rate_profile_json is not None and existing.heart_rate_profile_json != heart_rate_profile_json:
+            existing.heart_rate_profile_json = heart_rate_profile_json
+            changed = True
         return ("updated" if changed else "unchanged", existing)
 
     # Cross-source duplicate check: the same real-world activity imported
@@ -275,6 +327,10 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             for field, value in extra_fields.items():
                 if value is not None:
                     setattr(dup, field, value)
+            if elevation_profile_json is not None:
+                dup.elevation_profile_json = elevation_profile_json
+            if heart_rate_profile_json is not None:
+                dup.heart_rate_profile_json = heart_rate_profile_json
             return ("updated", dup)
         else:
             return ("unchanged", dup)  # lower/equal priority source - discard the new one
@@ -290,6 +346,8 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         duration_s=duration_s,
         full_points_json=json.dumps(points),
         resampled_points_json=json.dumps(resampled),
+        elevation_profile_json=elevation_profile_json,
+        heart_rate_profile_json=heart_rate_profile_json,
         **extra_fields,
     )
     db.add(activity)
@@ -754,6 +812,23 @@ def _ordered_activity_ids_for_context(db: Session, request: Request):
     return None
 
 
+CHART_MAX_POINTS = 150
+
+
+def _downsample_profile(values, max_points=CHART_MAX_POINTS):
+    """Evenly downsamples a list (possibly containing None gaps) to at
+    most max_points entries, for lightweight charting - a full-resolution
+    GPS track can have thousands of points, far more than a small inline
+    SVG chart needs to look smooth."""
+    if not values:
+        return None
+    n = len(values)
+    if n <= max_points:
+        return values
+    step = n / max_points
+    return [values[int(i * step)] for i in range(max_points)]
+
+
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
 def activity_detail(activity_id: int, request: Request, db: Session = Depends(get_db)):
     activity = db.query(Activity).filter_by(id=activity_id).first()
@@ -772,12 +847,17 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         counts = _group_activity_counts(db, [activity.group_id])
         group_count = counts.get(activity.group_id, 0)
 
+    elevation_chart_data = _downsample_profile(activity.elevation_profile) if activity else None
+    heart_rate_chart_data = _downsample_profile(activity.heart_rate_profile) if activity else None
+
     return templates.TemplateResponse("activity.html", {
         "request": request,
         "activity": activity,
         "prev_id": prev_id,
         "next_id": next_id,
         "group_count": group_count,
+        "elevation_chart_data": elevation_chart_data,
+        "heart_rate_chart_data": heart_rate_chart_data,
         # Carried forward on the Prev/Next links themselves so continued
         # navigation keeps working, not just the initial link into here.
         "nav_query_string": request.url.query,
@@ -1668,6 +1748,12 @@ def do_garmin_sync(db: Session, job=None):
             max_heart_rate=a.get("maxHR"),
             avg_cadence=a.get("averageRunningCadenceInStepsPerMinute") or a.get("averageBikingCadenceInRevPerMinute"),
             calories=a.get("calories"),
+            # The GPX Garmin's own servers generate for download commonly
+            # includes both standard elevation and Garmin's own heart-rate
+            # extension per point - this was sitting right there in the
+            # already-parsed GPX, just never passed through to be stored.
+            elevation_profile=parsed.get("elevation_profile"),
+            heart_rate_profile=parsed.get("heart_rate_profile"),
         )
         if status == "added":
             added += 1
