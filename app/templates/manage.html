@@ -373,6 +373,28 @@
             form.addEventListener('submit', function (e) {
                 e.preventDefault();
                 if (!fileInput.files.length) return;
+
+                var file = fileInput.files[0];
+                var isIngress = {{ 'true' if base_path else 'false' }};
+                // Stay safely under Home Assistant's ~16MB hard limit
+                // (leaving headroom for multipart overhead) - catching this
+                // here means an oversized file fails immediately with a
+                // clear explanation, instead of the upload silently
+                // hanging partway through with no feedback, which is what
+                // actually happens if this is left to the server/ingress
+                // proxy to reject.
+                var INGRESS_SAFE_LIMIT = 15 * 1024 * 1024;
+                if (isIngress && file.size > INGRESS_SAFE_LIMIT) {
+                    alert(
+                        'This file is ' + (file.size / (1024 * 1024)).toFixed(1) + 'MB - larger than ' +
+                        'Home Assistant\'s ingress can handle (about 16MB). Importing it here would ' +
+                        'hang or fail partway through instead of actually working.\n\n' +
+                        'Use the direct port instead for this import specifically, e.g.\n' +
+                        'http://<your-ha-host>:8000/manage'
+                    );
+                    return;
+                }
+
                 if (!window.confirm('This REPLACES everything currently in this app with the uploaded database. Continue?')) {
                     return;
                 }

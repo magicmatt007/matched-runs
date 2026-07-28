@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.13.1
+- Fixed the database import silently hanging forever (stuck at a tiny
+  percentage, no error, no feedback) when attempted through Home
+  Assistant's ingress with a file over the ~16MB limit - the in-app
+  warning about this was already there, but nothing stopped you from
+  starting the doomed upload anyway. Now checks the selected file's size
+  against the ingress limit *before* starting the upload, and blocks it
+  immediately with a clear explanation instead of leaving you watching a
+  progress bar that was never going to finish. Verified across all the
+  boundary cases (ingress vs. direct port, just under vs. just over the
+  threshold).
+
 ## 1.13.0
 - The 1.12.2 timing logs paid off: for a real 2020-file Strava import,
   parsing was 95.7% of the entire 977-second total (934.6s), while route
