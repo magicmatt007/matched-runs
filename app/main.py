@@ -22,7 +22,7 @@ from app.models import Activity, RouteGroup, StravaToken, GarminSyncState
 from app.gpx_parser import parse_gpx_bytes
 from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
-from app.matcher import resample_track, rebuild_groups, incremental_rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY
+from app.matcher import resample_track, rebuild_groups, incremental_rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY, haversine
 from app.polyline_util import decode_polyline
 from app.type_normalize import normalize_activity_type, merge_legacy_type
 from app.strava_csv import parse_strava_activities_csv
@@ -862,18 +862,52 @@ def _ordered_activity_ids_for_context(db: Session, request: Request):
 CHART_MAX_POINTS = 150
 
 
-def _downsample_profile(values, max_points=CHART_MAX_POINTS):
-    """Evenly downsamples a list (possibly containing None gaps) to at
-    most max_points entries, for lightweight charting - a full-resolution
-    GPS track can have thousands of points, far more than a small inline
-    SVG chart needs to look smooth."""
-    if not values:
+def _build_chart_points(full_points, elevation_profile, heart_rate_profile, max_points=CHART_MAX_POINTS):
+    """Combines position, cumulative distance, elevation, and heart rate
+    into one aligned, downsampled series - one entry per point, all
+    referring to the exact same point in the original recording. This is
+    what makes it possible to hover a spot on the elevation/heart-rate
+    chart and know exactly where that was on the map: each entry carries
+    the lat/lon that goes with that particular elevation/HR reading.
+
+    Evenly downsampled to at most max_points entries (always including the
+    very last point, so the chart/map linkage reaches the true end of the
+    route) - a full-resolution GPS track can have thousands of points, far
+    more than a small inline chart needs to look smooth. Returns None if
+    there's no elevation AND no heart rate data at all (nothing to chart).
+    """
+    if not full_points:
         return None
-    n = len(values)
+    has_elevation = elevation_profile and any(e is not None for e in elevation_profile)
+    has_hr = heart_rate_profile and any(h is not None for h in heart_rate_profile)
+    if not has_elevation and not has_hr:
+        return None
+
+    n = len(full_points)
+    cum_dist_m = [0.0] * n
+    for i in range(1, n):
+        lat1, lon1 = full_points[i - 1]
+        lat2, lon2 = full_points[i]
+        cum_dist_m[i] = cum_dist_m[i - 1] + haversine(lat1, lon1, lat2, lon2)
+
     if n <= max_points:
-        return values
-    step = n / max_points
-    return [values[int(i * step)] for i in range(max_points)]
+        indices = list(range(n))
+    else:
+        step = n / max_points
+        indices = [int(i * step) for i in range(max_points)]
+        if indices[-1] != n - 1:
+            indices.append(n - 1)
+
+    chart_points = []
+    for i in indices:
+        chart_points.append({
+            "lat": full_points[i][0],
+            "lon": full_points[i][1],
+            "dist_km": round(cum_dist_m[i] / 1000.0, 3),
+            "elevation": elevation_profile[i] if elevation_profile else None,
+            "heart_rate": heart_rate_profile[i] if heart_rate_profile else None,
+        })
+    return chart_points
 
 
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
@@ -894,8 +928,11 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         counts = _group_activity_counts(db, [activity.group_id])
         group_count = counts.get(activity.group_id, 0)
 
-    elevation_chart_data = _downsample_profile(activity.elevation_profile) if activity else None
-    heart_rate_chart_data = _downsample_profile(activity.heart_rate_profile) if activity else None
+    chart_points = None
+    if activity:
+        chart_points = _build_chart_points(
+            activity.full_points, activity.elevation_profile, activity.heart_rate_profile,
+        )
 
     return templates.TemplateResponse("activity.html", {
         "request": request,
@@ -903,8 +940,7 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         "prev_id": prev_id,
         "next_id": next_id,
         "group_count": group_count,
-        "elevation_chart_data": elevation_chart_data,
-        "heart_rate_chart_data": heart_rate_chart_data,
+        "chart_points": chart_points,
         # Carried forward on the Prev/Next links themselves so continued
         # navigation keeps working, not just the initial link into here.
         "nav_query_string": request.url.query,

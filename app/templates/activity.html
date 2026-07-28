@@ -97,6 +97,27 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 const pts = {{ activity.full_points | tojson }};
 const line = L.polyline(pts, {color: '#e6194b', weight: 4}).addTo(map);
 map.fitBounds(line.getBounds());
+
+// Exposed globally so the elevation/heart-rate chart script below (a
+// separate <script> block) can highlight a point on this map when you
+// hover the corresponding spot on a chart - without needing its own
+// reference to the Leaflet map object.
+let matchedRunsHighlightMarker = null;
+window.matchedRunsHighlightMapPoint = function (lat, lon) {
+    if (!matchedRunsHighlightMarker) {
+        matchedRunsHighlightMarker = L.circleMarker([lat, lon], {
+            radius: 8, color: '#ffffff', weight: 2, fillColor: '#fc5200', fillOpacity: 1
+        }).addTo(map);
+    } else {
+        matchedRunsHighlightMarker.setLatLng([lat, lon]);
+        matchedRunsHighlightMarker.setStyle({ opacity: 1, fillOpacity: 1 });
+    }
+};
+window.matchedRunsHideMapPoint = function () {
+    if (matchedRunsHighlightMarker) {
+        matchedRunsHighlightMarker.setStyle({ opacity: 0, fillOpacity: 0 });
+    }
+};
 </script>
 {% else %}
 <div class="panel">
@@ -104,14 +125,12 @@ map.fitBounds(line.getBounds());
 </div>
 {% endif %}
 
-{% if elevation_chart_data %}
+{% if chart_points %}
 <div class="panel">
     <h3 style="margin-top:0;">Elevation (m)</h3>
     <div id="elevation-chart"></div>
 </div>
-{% endif %}
 
-{% if heart_rate_chart_data %}
 <div class="panel">
     <h3 style="margin-top:0;">Heart Rate (bpm)</h3>
     <div id="heart-rate-chart"></div>
@@ -120,44 +139,58 @@ map.fitBounds(line.getBounds());
 
 <script>
 (function () {
-    // Shared renderer for both charts below - a simple line chart over the
-    // course of the activity (x-axis = position in the recorded track,
-    // not calibrated to exact distance/time). Skips any null readings by
-    // connecting straight across the gap, rather than breaking the line -
-    // fine for the odd missing point, which is the common case.
-    function renderLineChart(containerId, data, color, label) {
+    var chartPoints = {{ chart_points | tojson }};
+
+    // Shared renderer for both charts below: x-axis is actual distance
+    // along the route (not just point order), with an average reference
+    // line, and hover interactivity - moving the mouse over the chart
+    // shows the exact value/distance at that point and highlights the
+    // matching spot on the map above (via the hooks the map script
+    // exposed), since every chart point carries the lat/lon it came from.
+    function renderProfileChart(containerId, valueKey, color, unit, label) {
         var container = document.getElementById(containerId);
         if (!container) return;
 
-        var validValues = (data || []).filter(function (v) { return v !== null && v !== undefined; });
-        if (validValues.length < 2) {
+        var validPoints = (chartPoints || []).filter(function (p) {
+            return p[valueKey] !== null && p[valueKey] !== undefined;
+        });
+        if (validPoints.length < 2) {
             var article = /^[aeiou]/i.test(label) ? 'an' : 'a';
             container.innerHTML = '<p class="muted">Not enough data for ' + article + ' ' + label.toLowerCase() + ' chart.</p>';
             return;
         }
 
         var width = container.clientWidth || 800;
-        var height = 180;
-        var padding = { top: 16, right: 16, bottom: 16, left: 44 };
+        var height = 200;
+        var padding = { top: 16, right: 16, bottom: 34, left: 46 };
         var plotW = width - padding.left - padding.right;
         var plotH = height - padding.top - padding.bottom;
 
-        var minV = Math.min.apply(null, validValues);
-        var maxV = Math.max.apply(null, validValues);
+        var values = validPoints.map(function (p) { return p[valueKey]; });
+        var minV = Math.min.apply(null, values);
+        var maxV = Math.max.apply(null, values);
         if (minV === maxV) { minV -= 1; maxV += 1; }
-        var pad = (maxV - minV) * 0.1;
-        minV -= pad;
-        maxV += pad;
+        var vpad = (maxV - minV) * 0.1;
+        minV -= vpad;
+        maxV += vpad;
 
-        function xFor(i) {
-            return padding.left + (i / (data.length - 1)) * plotW;
+        var minDist = validPoints[0].dist_km;
+        var maxDist = validPoints[validPoints.length - 1].dist_km;
+        if (maxDist <= minDist) maxDist = minDist + 0.001;
+
+        var avg = values.reduce(function (a, b) { return a + b; }, 0) / values.length;
+
+        function xFor(distKm) {
+            return padding.left + ((distKm - minDist) / (maxDist - minDist)) * plotW;
         }
         function yFor(v) {
             return padding.top + plotH - ((v - minV) / (maxV - minV)) * plotH;
         }
 
-        var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" style="width:100%; height:' + height + 'px;">';
+        var svg = '<svg id="' + containerId + '-svg" viewBox="0 0 ' + width + ' ' + height +
+                   '" style="width:100%; height:' + height + 'px; cursor: crosshair;">';
 
+        // y-axis gridlines + labels
         var tickCount = 3;
         for (var t = 0; t <= tickCount; t++) {
             var val = minV + (t / tickCount) * (maxV - minV);
@@ -166,19 +199,104 @@ map.fitBounds(line.getBounds());
             svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + Math.round(val) + '</text>';
         }
 
-        var linePoints = [];
-        data.forEach(function (v, i) {
-            if (v === null || v === undefined) return;
-            linePoints.push(xFor(i) + ',' + yFor(v));
-        });
-        svg += '<polyline points="' + linePoints.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="2" />';
+        // x-axis distance labels
+        var xTickCount = Math.min(6, validPoints.length - 1) || 1;
+        for (var xt = 0; xt <= xTickCount; xt++) {
+            var d = minDist + (xt / xTickCount) * (maxDist - minDist);
+            var xx = xFor(d);
+            svg += '<text x="' + xx + '" y="' + (height - padding.bottom + 16) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">' + d.toFixed(1) + '</text>';
+        }
+        svg += '<text x="' + (padding.left + plotW / 2) + '" y="' + (height - 4) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">Distance (km)</text>';
+
+        // average reference line
+        var avgY = yFor(avg);
+        svg += '<line x1="' + padding.left + '" y1="' + avgY + '" x2="' + (width - padding.right) + '" y2="' + avgY +
+               '" stroke="' + color + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.6" />';
+        svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">avg ' + Math.round(avg) + unit + '</text>';
+
+        // main line
+        var linePoints = validPoints.map(function (p) { return xFor(p.dist_km) + ',' + yFor(p[valueKey]); }).join(' ');
+        svg += '<polyline points="' + linePoints + '" fill="none" stroke="' + color + '" stroke-width="2" />';
+
+        // hover indicator (hidden until moused over)
+        svg += '<line id="' + containerId + '-hoverline" x1="0" y1="' + padding.top + '" x2="0" y2="' + (padding.top + plotH) + '" stroke="#ffffff" stroke-width="1" opacity="0" />';
+        svg += '<circle id="' + containerId + '-hoverdot" r="4" fill="' + color + '" stroke="#ffffff" stroke-width="1.5" opacity="0" />';
+
+        // transparent overlay that actually captures hover/touch events
+        svg += '<rect id="' + containerId + '-hoverrect" x="' + padding.left + '" y="' + padding.top + '" width="' + plotW + '" height="' + plotH + '" fill="transparent" />';
 
         svg += '</svg>';
+        svg += '<div id="' + containerId + '-tooltip" class="muted" style="min-height: 18px; font-size: 0.85rem;">Hover the chart for details</div>';
+
         container.innerHTML = svg;
+
+        var hoverRect = document.getElementById(containerId + '-hoverrect');
+        var hoverLine = document.getElementById(containerId + '-hoverline');
+        var hoverDot = document.getElementById(containerId + '-hoverdot');
+        var tooltip = document.getElementById(containerId + '-tooltip');
+        var svgEl = document.getElementById(containerId + '-svg');
+
+        function nearestPoint(hoveredDist) {
+            var nearest = validPoints[0];
+            var bestDiff = Math.abs(nearest.dist_km - hoveredDist);
+            for (var i = 1; i < validPoints.length; i++) {
+                var diff = Math.abs(validPoints[i].dist_km - hoveredDist);
+                if (diff < bestDiff) {
+                    bestDiff = diff;
+                    nearest = validPoints[i];
+                }
+            }
+            return nearest;
+        }
+
+        function handleMove(clientX) {
+            var rect = svgEl.getBoundingClientRect();
+            if (rect.width === 0) return;
+            var scale = width / rect.width; // viewBox units per CSS pixel
+            var mouseX = (clientX - rect.left) * scale;
+            var hoveredDist = minDist + ((mouseX - padding.left) / plotW) * (maxDist - minDist);
+
+            var nearest = nearestPoint(hoveredDist);
+            var px = xFor(nearest.dist_km);
+            var py = yFor(nearest[valueKey]);
+
+            hoverLine.setAttribute('x1', px);
+            hoverLine.setAttribute('x2', px);
+            hoverLine.setAttribute('opacity', 0.4);
+            hoverDot.setAttribute('cx', px);
+            hoverDot.setAttribute('cy', py);
+            hoverDot.setAttribute('opacity', 1);
+
+            tooltip.textContent = nearest.dist_km.toFixed(2) + ' km: ' + Math.round(nearest[valueKey]) + unit;
+
+            if (window.matchedRunsHighlightMapPoint) {
+                window.matchedRunsHighlightMapPoint(nearest.lat, nearest.lon);
+            }
+        }
+
+        function handleLeave() {
+            hoverLine.setAttribute('opacity', 0);
+            hoverDot.setAttribute('opacity', 0);
+            tooltip.textContent = 'Hover the chart for details';
+            if (window.matchedRunsHideMapPoint) {
+                window.matchedRunsHideMapPoint();
+            }
+        }
+
+        hoverRect.addEventListener('mousemove', function (evt) { handleMove(evt.clientX); });
+        hoverRect.addEventListener('mouseleave', handleLeave);
+        // Touch support (e.g. dragging a finger across the chart on mobile)
+        hoverRect.addEventListener('touchmove', function (evt) {
+            if (evt.touches && evt.touches[0]) {
+                handleMove(evt.touches[0].clientX);
+            }
+            evt.preventDefault();
+        }, { passive: false });
+        hoverRect.addEventListener('touchend', handleLeave);
     }
 
-    renderLineChart('elevation-chart', {{ elevation_chart_data | tojson }}, '#3cb44b', 'Elevation');
-    renderLineChart('heart-rate-chart', {{ heart_rate_chart_data | tojson }}, '#e6194b', 'Heart Rate');
+    renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation');
+    renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate');
 })();
 </script>
 

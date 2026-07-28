@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.14.0
+- Elevation and heart rate charts on the activity detail page are now
+  properly interactive, all four requested improvements:
+  - **X-axis units**: now labeled with actual distance along the route
+    (km), not just point order.
+  - **Average line**: a dashed reference line with its value labeled.
+  - **Hover for exact values**: moving the mouse (or a finger, on
+    touchscreens) over either chart shows the precise value and distance
+    at that point.
+  - **Chart-to-map linking**: hovering a point on either chart now shows
+    exactly where on the map that elevation/heart rate occurred, via a
+    marker that follows your cursor across the chart.
+  - This required a real backend change: elevation, heart rate, GPS
+    position, and cumulative distance are now built into one combined,
+    aligned series per activity (previously elevation and heart rate were
+    two independent, unlinked arrays) - that's what makes it possible to
+    know which map location corresponds to which point on either chart.
+    Cumulative distance is computed via the same haversine function
+    already used for route matching.
+  - Verified the distance computation, the downsampling (always keeping
+    the true endpoint), the nearest-point hover lookup at exact matches,
+    midpoints, and out-of-range positions, and the actual hover-to-map
+    linking end-to-end (including that leaving the chart correctly hides
+    the map marker again) - all directly executed, not just read through.
+
 ## 1.13.1
 - Fixed the database import silently hanging forever (stuck at a tiny
   percentage, no error, no feedback) when attempted through Home
