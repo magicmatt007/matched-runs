@@ -51,6 +51,12 @@ class Activity(Base):
     # from the endpoints this app calls.
     elevation_profile_json = Column(Text, nullable=True)
     heart_rate_profile_json = Column(Text, nullable=True)
+    # Elapsed seconds since the activity's start, one per point (same
+    # alignment as the two above) - not itself a "detail" shown directly,
+    # but needed to derive pace at each point (distance and time between
+    # consecutive points), which isn't recorded directly the way
+    # elevation/heart rate are.
+    time_profile_json = Column(Text, nullable=True)
 
     group_id = Column(Integer, ForeignKey("route_groups.id"), nullable=True)
     group = relationship("RouteGroup", back_populates="activities")
@@ -72,6 +78,10 @@ class Activity(Base):
     @property
     def heart_rate_profile(self):
         return json.loads(self.heart_rate_profile_json) if self.heart_rate_profile_json else None
+
+    @property
+    def time_profile(self):
+        return json.loads(self.time_profile_json) if self.time_profile_json else None
 
 
 class StravaToken(Base):

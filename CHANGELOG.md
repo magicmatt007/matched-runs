@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.15.0
+- Added a pace chart to the activity detail page, alongside elevation and
+  heart rate - same interactivity (distance units, average line, hover
+  for exact values, chart-to-map linking). Faster pace renders higher on
+  the chart, matching the convention the route page's own pace-over-time
+  chart already uses.
+  - Pace isn't recorded directly the way elevation/heart rate are - it's
+    derived from distance and elapsed time between points, which required
+    storing per-point timestamps for the first time (a new column; only
+    file-based imports and Garmin live sync populate it, same scope as
+    elevation/heart rate). Deriving pace between consecutive *downsampled*
+    chart points (not raw GPS points) rather than adding a separate
+    smoothing step - naturally avoids the GPS jitter that would make a
+    true point-to-point pace unreadable, for free.
+  - Verified the pace math against a known scenario (200m/60s segments ->
+    confirmed ~5:00/km), confirmed a paused segment (zero distance, time
+    still elapsing) correctly gives "no pace" instead of an infinite/
+    garbage value, and confirmed activities with only some of elevation/
+    heart rate/timing data still chart whatever they do have. Also
+    verified the inverted y-axis directly (faster pace produces a smaller
+    y-coordinate, i.e. renders higher) rather than assuming the sign was
+    right.
+
 ## 1.14.0
 - Elevation and heart rate charts on the activity detail page are now
   properly interactive, all four requested improvements:

@@ -35,6 +35,7 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     altitudes = []
     heart_rates = []  # flat list of every HR reading found, for avg/max summary stats
     heart_rate_series = []  # per-point aligned with points/altitudes, for the chart
+    times = []  # per-point aligned, parsed datetime or None
     cadences = []
     start_time = None
     last_distance = None
@@ -84,17 +85,21 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
                 except ValueError:
                     pass
 
+        point_time = None
+        if time_val:
+            try:
+                point_time = datetime.fromisoformat(time_val.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+
         # IMPORTANT: capture time/distance regardless of whether GPS
         # position is present. Indoor activities (pool swims especially)
         # often have Time/DistanceMeters per trackpoint but NO Position at
         # all - gating this behind a valid lat/lon (like the points.append
         # below correctly does) would silently lose distance/start_time
         # for every indoor activity.
-        if time_val and start_time is None:
-            try:
-                start_time = datetime.fromisoformat(time_val.replace("Z", "+00:00"))
-            except ValueError:
-                pass
+        if point_time and start_time is None:
+            start_time = point_time
         if dist_val is not None:
             last_distance = dist_val
 
@@ -103,6 +108,7 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
         points.append((lat, lon))
         altitudes.append(alt_val)
         heart_rate_series.append(point_hr)
+        times.append(point_time)
 
     duration_s = None
     total_lap_time = 0.0
@@ -171,6 +177,15 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     if last_distance is None and found_lap_distance:
         last_distance = total_lap_distance
 
+    # Elapsed seconds since the activity's start, one per point - computed
+    # here (after start_time is fully finalized, since the Lap-level
+    # fallback above can also supply it) rather than during the trackpoint
+    # loop. Needed to derive pace at each point later - not itself
+    # displayed anywhere.
+    time_profile = None
+    if start_time is not None and any(t is not None for t in times):
+        time_profile = [(t - start_time).total_seconds() if t is not None else None for t in times]
+
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
@@ -209,4 +224,5 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
         "calories": total_calories if found_calories else None,
         "elevation_profile": altitudes if any(a is not None for a in altitudes) else None,
         "heart_rate_profile": heart_rate_series if any(h is not None for h in heart_rate_series) else None,
+        "time_profile": time_profile,
     }

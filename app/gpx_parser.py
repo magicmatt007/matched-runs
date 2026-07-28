@@ -22,6 +22,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
 
     points = []
     elevations = []
+    times = []  # per-point aligned, raw datetime or None
     # Per-point aligned (one entry per point, None where missing) - used
     # for both the summary avg/max stats and the activity detail page's
     # heart rate chart, which needs to know WHICH points had a reading.
@@ -33,6 +34,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
             for p in segment.points:
                 points.append((p.latitude, p.longitude))
                 elevations.append(p.elevation)
+                times.append(p.time)
                 if p.time and start_time is None:
                     start_time = p.time
 
@@ -63,6 +65,7 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
                 points.append((p.latitude, p.longitude))
                 elevations.append(p.elevation)
                 heart_rate_series.append(None)
+                times.append(p.time)
 
     # No raise here for an empty points list - see fit_parser.py for why
     # (indoor activities are still worth importing without a route).
@@ -90,6 +93,15 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
     except Exception:
         pass
 
+    # Elapsed seconds since the activity's start, one per point - computed
+    # here (while start_time is still the original, possibly
+    # timezone-aware value straight from gpxpy) since every p.time shares
+    # that same timezone, so a direct subtraction is safe. Needed to
+    # derive pace at each point later - not itself displayed anywhere.
+    time_profile = None
+    if start_time is not None and any(t is not None for t in times):
+        time_profile = [(t - start_time).total_seconds() if t is not None else None for t in times]
+
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
@@ -115,4 +127,5 @@ def parse_gpx_bytes(data: bytes, fallback_name: str = "Run"):
         # it entirely when the data was never present at all.
         "elevation_profile": elevations if any(e is not None for e in elevations) else None,
         "heart_rate_profile": heart_rate_series if hr_values else None,
+        "time_profile": time_profile,
     }

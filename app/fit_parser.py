@@ -17,6 +17,7 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     points = []
     altitudes = []
     heart_rates = []  # per-point aligned with points, None where missing
+    timestamps = []  # per-point aligned, raw timestamp or None
     start_time = None
     for record in fitfile.get_messages("record"):
         # Building this dict once (a single pass over the record's fields)
@@ -45,6 +46,7 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         altitudes.append(alt)
         heart_rates.append(fields.get("heart_rate"))
         ts = fields.get("timestamp")
+        timestamps.append(ts)
         if ts and start_time is None:
             start_time = ts
 
@@ -117,6 +119,15 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     name = fallback_name
     activity_type = sport.replace("_", " ").title() if sport else None
 
+    # Elapsed seconds since the activity's start, one per point - computed
+    # here (after start_time is fully finalized, since the session message
+    # above can also supply/override it) rather than during the record
+    # loop. Needed to derive pace at each point later - not itself
+    # displayed anywhere.
+    time_profile = None
+    if start_time is not None and any(t is not None for t in timestamps):
+        time_profile = [(t - start_time).total_seconds() if t is not None else None for t in timestamps]
+
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)
 
@@ -137,4 +148,5 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         "calories": calories,
         "elevation_profile": altitudes if any(a is not None for a in altitudes) else None,
         "heart_rate_profile": heart_rates if hr_values else None,
+        "time_profile": time_profile,
     }

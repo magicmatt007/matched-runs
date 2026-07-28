@@ -200,6 +200,7 @@ def _run_import_sync(files_data, name_overrides, job):
                 calories=parsed.get("calories"),
                 elevation_profile=parsed.get("elevation_profile"),
                 heart_rate_profile=parsed.get("heart_rate_profile"),
+                time_profile=parsed.get("time_profile"),
             )
             if status == "added":
                 added += 1
@@ -307,7 +308,8 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     activity_type: str = None, elevation_gain_m=None,
                     elevation_loss_m=None, avg_heart_rate=None,
                     max_heart_rate=None, avg_cadence=None, calories=None,
-                    elevation_profile=None, heart_rate_profile=None):
+                    elevation_profile=None, heart_rate_profile=None,
+                    time_profile=None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
@@ -324,6 +326,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     # same json.dumps(...) at each of the three places these get written.
     elevation_profile_json = json.dumps(elevation_profile) if elevation_profile is not None else None
     heart_rate_profile_json = json.dumps(heart_rate_profile) if heart_rate_profile is not None else None
+    time_profile_json = json.dumps(time_profile) if time_profile is not None else None
 
     if existing:
         # Re-imported (e.g. re-uploading the same export after an app update
@@ -347,6 +350,9 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             changed = True
         if heart_rate_profile_json is not None and existing.heart_rate_profile_json != heart_rate_profile_json:
             existing.heart_rate_profile_json = heart_rate_profile_json
+            changed = True
+        if time_profile_json is not None and existing.time_profile_json != time_profile_json:
+            existing.time_profile_json = time_profile_json
             changed = True
         return ("updated" if changed else "unchanged", existing)
 
@@ -378,6 +384,8 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                 dup.elevation_profile_json = elevation_profile_json
             if heart_rate_profile_json is not None:
                 dup.heart_rate_profile_json = heart_rate_profile_json
+            if time_profile_json is not None:
+                dup.time_profile_json = time_profile_json
             return ("updated", dup)
         else:
             return ("unchanged", dup)  # lower/equal priority source - discard the new one
@@ -395,6 +403,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         resampled_points_json=json.dumps(resampled),
         elevation_profile_json=elevation_profile_json,
         heart_rate_profile_json=heart_rate_profile_json,
+        time_profile_json=time_profile_json,
         **extra_fields,
     )
     db.add(activity)
@@ -862,25 +871,33 @@ def _ordered_activity_ids_for_context(db: Session, request: Request):
 CHART_MAX_POINTS = 150
 
 
-def _build_chart_points(full_points, elevation_profile, heart_rate_profile, max_points=CHART_MAX_POINTS):
-    """Combines position, cumulative distance, elevation, and heart rate
-    into one aligned, downsampled series - one entry per point, all
+def _build_chart_points(full_points, elevation_profile, heart_rate_profile, time_profile, max_points=CHART_MAX_POINTS):
+    """Combines position, cumulative distance, elevation, heart rate, and
+    pace into one aligned, downsampled series - one entry per point, all
     referring to the exact same point in the original recording. This is
-    what makes it possible to hover a spot on the elevation/heart-rate
-    chart and know exactly where that was on the map: each entry carries
-    the lat/lon that goes with that particular elevation/HR reading.
+    what makes it possible to hover a spot on any of the elevation/heart-
+    rate/pace charts and know exactly where that was on the map: each
+    entry carries the lat/lon that goes with that particular reading.
+
+    Pace isn't recorded directly the way elevation/heart rate are - it's
+    derived from the distance and time between consecutive DOWNSAMPLED
+    points (not raw points), which naturally smooths out GPS jitter that
+    would make a true point-to-point pace far too noisy to read, without
+    needing a separate explicit smoothing pass.
 
     Evenly downsampled to at most max_points entries (always including the
     very last point, so the chart/map linkage reaches the true end of the
     route) - a full-resolution GPS track can have thousands of points, far
     more than a small inline chart needs to look smooth. Returns None if
-    there's no elevation AND no heart rate data at all (nothing to chart).
+    there's no elevation, heart rate, or usable timing data at all
+    (nothing to chart).
     """
     if not full_points:
         return None
     has_elevation = elevation_profile and any(e is not None for e in elevation_profile)
     has_hr = heart_rate_profile and any(h is not None for h in heart_rate_profile)
-    if not has_elevation and not has_hr:
+    has_time = time_profile and any(t is not None for t in time_profile)
+    if not has_elevation and not has_hr and not has_time:
         return None
 
     n = len(full_points)
@@ -906,7 +923,19 @@ def _build_chart_points(full_points, elevation_profile, heart_rate_profile, max_
             "dist_km": round(cum_dist_m[i] / 1000.0, 3),
             "elevation": elevation_profile[i] if elevation_profile else None,
             "heart_rate": heart_rate_profile[i] if heart_rate_profile else None,
+            "elapsed_s": time_profile[i] if time_profile else None,
+            "pace_s_per_km": None,  # filled in below, once neighboring points are known
         })
+
+    for j in range(1, len(chart_points)):
+        prev, cur = chart_points[j - 1], chart_points[j]
+        if prev["elapsed_s"] is None or cur["elapsed_s"] is None:
+            continue
+        dt = cur["elapsed_s"] - prev["elapsed_s"]
+        dd_km = cur["dist_km"] - prev["dist_km"]
+        if dt > 0 and dd_km > 0:
+            cur["pace_s_per_km"] = dt / dd_km
+
     return chart_points
 
 
@@ -932,6 +961,7 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
     if activity:
         chart_points = _build_chart_points(
             activity.full_points, activity.elevation_profile, activity.heart_rate_profile,
+            activity.time_profile,
         )
 
     return templates.TemplateResponse("activity.html", {
@@ -1837,6 +1867,7 @@ def do_garmin_sync(db: Session, job=None):
             # already-parsed GPX, just never passed through to be stored.
             elevation_profile=parsed.get("elevation_profile"),
             heart_rate_profile=parsed.get("heart_rate_profile"),
+            time_profile=parsed.get("time_profile"),
         )
         if status == "added":
             added += 1

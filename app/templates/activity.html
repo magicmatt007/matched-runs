@@ -127,6 +127,11 @@ window.matchedRunsHideMapPoint = function () {
 
 {% if chart_points %}
 <div class="panel">
+    <h3 style="margin-top:0;">Pace (min/km)</h3>
+    <div id="pace-chart"></div>
+</div>
+
+<div class="panel">
     <h3 style="margin-top:0;">Elevation (m)</h3>
     <div id="elevation-chart"></div>
 </div>
@@ -147,7 +152,11 @@ window.matchedRunsHideMapPoint = function () {
     // shows the exact value/distance at that point and highlights the
     // matching spot on the map above (via the hooks the map script
     // exposed), since every chart point carries the lat/lon it came from.
-    function renderProfileChart(containerId, valueKey, color, unit, label) {
+    function renderProfileChart(containerId, valueKey, color, unit, label, opts) {
+        opts = opts || {};
+        var invertY = opts.invertY || false;
+        var formatValue = opts.formatValue || function (v) { return Math.round(v) + unit; };
+
         var container = document.getElementById(containerId);
         if (!container) return;
 
@@ -184,7 +193,13 @@ window.matchedRunsHideMapPoint = function () {
             return padding.left + ((distKm - minDist) / (maxDist - minDist)) * plotW;
         }
         function yFor(v) {
-            return padding.top + plotH - ((v - minV) / (maxV - minV)) * plotH;
+            var normalized = (v - minV) / (maxV - minV);
+            // Inverted for pace: a faster (lower seconds/km) pace sits
+            // higher on the chart, matching the convention the route
+            // page's own pace-over-time chart already uses. Elevation and
+            // heart rate use the normal orientation (higher value = higher
+            // on the chart).
+            return invertY ? padding.top + normalized * plotH : padding.top + plotH - normalized * plotH;
         }
 
         var svg = '<svg id="' + containerId + '-svg" viewBox="0 0 ' + width + ' ' + height +
@@ -196,7 +211,7 @@ window.matchedRunsHideMapPoint = function () {
             var val = minV + (t / tickCount) * (maxV - minV);
             var y = yFor(val);
             svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
-            svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + Math.round(val) + '</text>';
+            svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + formatValue(val) + '</text>';
         }
 
         // x-axis distance labels
@@ -212,7 +227,7 @@ window.matchedRunsHideMapPoint = function () {
         var avgY = yFor(avg);
         svg += '<line x1="' + padding.left + '" y1="' + avgY + '" x2="' + (width - padding.right) + '" y2="' + avgY +
                '" stroke="' + color + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.6" />';
-        svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">avg ' + Math.round(avg) + unit + '</text>';
+        svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">avg ' + formatValue(avg) + '</text>';
 
         // main line
         var linePoints = validPoints.map(function (p) { return xFor(p.dist_km) + ',' + yFor(p[valueKey]); }).join(' ');
@@ -267,7 +282,7 @@ window.matchedRunsHideMapPoint = function () {
             hoverDot.setAttribute('cy', py);
             hoverDot.setAttribute('opacity', 1);
 
-            tooltip.textContent = nearest.dist_km.toFixed(2) + ' km: ' + Math.round(nearest[valueKey]) + unit;
+            tooltip.textContent = nearest.dist_km.toFixed(2) + ' km: ' + formatValue(nearest[valueKey]);
 
             if (window.matchedRunsHighlightMapPoint) {
                 window.matchedRunsHighlightMapPoint(nearest.lat, nearest.lon);
@@ -295,8 +310,19 @@ window.matchedRunsHideMapPoint = function () {
         hoverRect.addEventListener('touchend', handleLeave);
     }
 
+    function formatPace(secondsPerKm) {
+        if (!isFinite(secondsPerKm) || secondsPerKm <= 0) return '-';
+        var m = Math.floor(secondsPerKm / 60);
+        var s = Math.round(secondsPerKm % 60);
+        return m + ':' + String(s).padStart(2, '0');
+    }
+
     renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation');
     renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate');
+    renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', {
+        invertY: true,
+        formatValue: function (v) { return formatPace(v) + ' /km'; }
+    });
 })();
 </script>
 
