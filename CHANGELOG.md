@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.15.2
+- Fixed a brief pause (e.g. stopping for a photo at a summit) producing a
+  wildly inflated pace value that dominated the whole chart's y-axis
+  scale, flattening every other segment into a nearly straight line -
+  seen on a cycling activity where a rest stop at the top of a climb
+  showed as several hours-per-km. Real elapsed time over essentially zero
+  real movement (whatever tiny distance shows up there is just GPS jitter
+  while stationary) produces a pace calculation that's technically
+  correct but not meaningful. Now filtered out using each activity's own
+  median pace as the reference point (robust to the outlier itself,
+  unlike a plain average would be) rather than a fixed cutoff, since
+  normal pace varies enormously between a run and a bike ride. Verified
+  against a reconstruction of the actual reported scenario (climb, pause,
+  descent) - the pause is correctly dropped while both the slow climb and
+  fast descent pace values are preserved untouched.
+- Cycling activities now show "Speed (km/h)" instead of "Pace (min/km)",
+  matching how cyclists actually think about their performance (and how
+  Strava/Garmin Connect present it too) - detected via a keyword match
+  (cycl/bik) against the activity type, robust to however a specific
+  source phrases it (Road Biking, Mountain Biking, Gravel Cycling,
+  E-Biking, etc.), rather than requiring an exact string match. Faster
+  now correctly renders higher on the chart either way - pace and speed
+  have opposite numeric relationships to "faster", so the y-axis
+  orientation flips between the two, verified directly for both.
+
+## 1.15.1
+- Activities imported before the pace chart was added no longer show "not
+  enough data" - pace is now approximated from the activity's total
+  duration (assuming roughly even sampling across the route) when real
+  per-point timestamps aren't available, rather than requiring a
+  re-import. A small note appears under the chart in this case, since it's
+  a reasonable approximation, not as precise as activities with exact
+  per-point timing (it can't reflect pauses or variable GPS sampling
+  rates). Verified the synthesized pace lands on the expected value for a
+  known scenario, and that this fallback never fabricates data when
+  there's genuinely nothing to estimate from either.
+- Fixed the pace chart's y-axis labels getting clipped ("5:51 /km" showing
+  as just "51 /km"). Root cause: the axis labels were using the same
+  format as the average-line label and hover tooltip (which include the
+  full " /km" unit and have more room to spare), but the axis itself only
+  had enough space reserved for elevation/heart rate's much shorter plain
+  numbers. Confirmed this exact math against the reported screenshot
+  before fixing it (57.6px of text trying to fit in 38px of space,
+  clipping ~19.6px off the left - matching what was actually shown).
+  Axis labels now use a shorter unit-free format (the chart's title
+  already says "Pace (min/km)"), with extra margin reserved to
+  comfortably fit slower double-digit-minute paces too.
+
 ## 1.15.0
 - Added a pace chart to the activity detail page, alongside elevation and
   heart rate - same interactivity (distance units, average line, hover

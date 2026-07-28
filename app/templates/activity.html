@@ -127,8 +127,14 @@ window.matchedRunsHideMapPoint = function () {
 
 {% if chart_points %}
 <div class="panel">
-    <h3 style="margin-top:0;">Pace (min/km)</h3>
+    <h3 style="margin-top:0;">{% if is_cycling %}Speed (km/h){% else %}Pace (min/km){% endif %}</h3>
     <div id="pace-chart"></div>
+    {% if pace_is_estimated %}
+    <p class="muted" style="margin-bottom: 0; margin-top: 8px;">Estimated from
+        this activity's total duration (imported before per-point timing
+        was tracked) - the overall shape is representative, but won't be as
+        precise as activities with exact per-point timestamps.</p>
+    {% endif %}
 </div>
 
 <div class="panel">
@@ -156,6 +162,12 @@ window.matchedRunsHideMapPoint = function () {
         opts = opts || {};
         var invertY = opts.invertY || false;
         var formatValue = opts.formatValue || function (v) { return Math.round(v) + unit; };
+        // Separate from formatValue (used for the average line and hover
+        // tooltip, where there's room to spare) since the y-axis itself is
+        // tight on space - pace's "5:30" labels need noticeably more room
+        // than elevation/heart rate's plain "120", which is exactly what
+        // was getting clipped before this had its own formatter/padding.
+        var formatAxisTick = opts.formatAxisTick || formatValue;
 
         var container = document.getElementById(containerId);
         if (!container) return;
@@ -171,7 +183,7 @@ window.matchedRunsHideMapPoint = function () {
 
         var width = container.clientWidth || 800;
         var height = 200;
-        var padding = { top: 16, right: 16, bottom: 34, left: 46 };
+        var padding = { top: 16, right: 16, bottom: 34, left: opts.leftPadding || 46 };
         var plotW = width - padding.left - padding.right;
         var plotH = height - padding.top - padding.bottom;
 
@@ -211,7 +223,7 @@ window.matchedRunsHideMapPoint = function () {
             var val = minV + (t / tickCount) * (maxV - minV);
             var y = yFor(val);
             svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
-            svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + formatValue(val) + '</text>';
+            svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + formatAxisTick(val) + '</text>';
         }
 
         // x-axis distance labels
@@ -319,10 +331,35 @@ window.matchedRunsHideMapPoint = function () {
 
     renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation');
     renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate');
-    renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', {
-        invertY: true,
-        formatValue: function (v) { return formatPace(v) + ' /km'; }
-    });
+
+    var isCycling = {{ 'true' if is_cycling else 'false' }};
+    if (isCycling) {
+        // Cyclists conventionally think in speed (km/h), not pace -
+        // converted here from the same underlying pace_s_per_km each
+        // point already carries, rather than duplicating that data on
+        // the server. Higher speed = faster, so this uses the normal
+        // (non-inverted) orientation, same as elevation/heart rate -
+        // only pace itself needs inverting, since there a SMALLER number
+        // means faster.
+        (chartPoints || []).forEach(function (p) {
+            p.speed_kmh = (p.pace_s_per_km && p.pace_s_per_km > 0) ? 3600 / p.pace_s_per_km : null;
+        });
+        renderProfileChart('pace-chart', 'speed_kmh', '#4363d8', ' km/h', 'Speed', {
+            formatValue: function (v) { return v.toFixed(1) + ' km/h'; },
+            formatAxisTick: function (v) { return v.toFixed(0); }
+        });
+    } else {
+        renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', {
+            invertY: true,
+            formatValue: function (v) { return formatPace(v) + ' /km'; },
+            // Shorter, no unit - the chart title already says "Pace (min/km)",
+            // and the axis itself is the tightest space in the whole chart.
+            formatAxisTick: formatPace,
+            // "5:30"-style labels need more room than elevation/heart rate's
+            // plain numbers - this is what was actually getting clipped.
+            leftPadding: 52
+        });
+    }
 })();
 </script>
 

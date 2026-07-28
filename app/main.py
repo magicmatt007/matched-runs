@@ -871,7 +871,8 @@ def _ordered_activity_ids_for_context(db: Session, request: Request):
 CHART_MAX_POINTS = 150
 
 
-def _build_chart_points(full_points, elevation_profile, heart_rate_profile, time_profile, max_points=CHART_MAX_POINTS):
+def _build_chart_points(full_points, elevation_profile, heart_rate_profile, time_profile,
+                         duration_s=None, max_points=CHART_MAX_POINTS):
     """Combines position, cumulative distance, elevation, heart rate, and
     pace into one aligned, downsampled series - one entry per point, all
     referring to the exact same point in the original recording. This is
@@ -888,19 +889,35 @@ def _build_chart_points(full_points, elevation_profile, heart_rate_profile, time
     Evenly downsampled to at most max_points entries (always including the
     very last point, so the chart/map linkage reaches the true end of the
     route) - a full-resolution GPS track can have thousands of points, far
-    more than a small inline chart needs to look smooth. Returns None if
-    there's no elevation, heart rate, or usable timing data at all
-    (nothing to chart).
+    more than a small inline chart needs to look smooth.
+
+    Returns (chart_points, pace_is_estimated), or (None, False) if there's
+    no elevation, heart rate, or usable timing data at all (nothing to
+    chart). pace_is_estimated is True when real per-point timestamps
+    weren't available (e.g. the activity was imported before that started
+    being tracked) and elapsed time was instead approximated from the
+    activity's total duration assuming roughly even sampling - not as
+    accurate as real per-point timing (can't reflect pauses or variable
+    GPS sampling rates), but still gives a usable pace chart instead of
+    nothing at all for older imports.
     """
     if not full_points:
-        return None
+        return None, False
+
+    n = len(full_points)
     has_elevation = elevation_profile and any(e is not None for e in elevation_profile)
     has_hr = heart_rate_profile and any(h is not None for h in heart_rate_profile)
     has_time = time_profile and any(t is not None for t in time_profile)
-    if not has_elevation and not has_hr and not has_time:
-        return None
 
-    n = len(full_points)
+    pace_is_estimated = False
+    if not has_time and duration_s and duration_s > 0 and n > 1:
+        time_profile = [(i / (n - 1)) * duration_s for i in range(n)]
+        has_time = True
+        pace_is_estimated = True
+
+    if not has_elevation and not has_hr and not has_time:
+        return None, False
+
     cum_dist_m = [0.0] * n
     for i in range(1, n):
         lat1, lon1 = full_points[i - 1]
@@ -936,7 +953,35 @@ def _build_chart_points(full_points, elevation_profile, heart_rate_profile, time
         if dt > 0 and dd_km > 0:
             cur["pace_s_per_km"] = dt / dd_km
 
-    return chart_points
+    # A brief pause (e.g. stopping for a photo at a summit) can produce a
+    # wildly inflated pace for that one segment - real elapsed time over
+    # essentially zero real movement (whatever tiny distance shows up
+    # there is just GPS jitter while stationary). Left alone, one such
+    # point can dominate the whole chart's y-axis scale and flatten
+    # everything else into a nearly straight line. Filtered out using each
+    # activity's own median pace as the reference (robust to the outlier
+    # itself, unlike a mean would be) rather than a fixed cutoff, since
+    # "normal" pace varies enormously between a run and a bike ride.
+    raw_paces = sorted(p["pace_s_per_km"] for p in chart_points if p["pace_s_per_km"] is not None)
+    if raw_paces:
+        median_pace = raw_paces[len(raw_paces) // 2]
+        outlier_threshold = median_pace * 4
+        for p in chart_points:
+            if p["pace_s_per_km"] is not None and p["pace_s_per_km"] > outlier_threshold:
+                p["pace_s_per_km"] = None
+
+    return chart_points, pace_is_estimated
+
+
+def _is_cycling_type(activity_type: str) -> bool:
+    """Cycling can be reported as many different strings depending on the
+    source (Cycling, Road Biking, Mountain Biking, Gravel Cycling,
+    E-Biking...) - a keyword match is far more robust than an exact
+    comparison against one specific string."""
+    if not activity_type:
+        return False
+    lowered = activity_type.lower()
+    return "cycl" in lowered or "bik" in lowered
 
 
 @app.get("/activity/{activity_id}", response_class=HTMLResponse)
@@ -958,10 +1003,11 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         group_count = counts.get(activity.group_id, 0)
 
     chart_points = None
+    pace_is_estimated = False
     if activity:
-        chart_points = _build_chart_points(
+        chart_points, pace_is_estimated = _build_chart_points(
             activity.full_points, activity.elevation_profile, activity.heart_rate_profile,
-            activity.time_profile,
+            activity.time_profile, duration_s=activity.duration_s,
         )
 
     return templates.TemplateResponse("activity.html", {
@@ -971,6 +1017,8 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         "next_id": next_id,
         "group_count": group_count,
         "chart_points": chart_points,
+        "pace_is_estimated": pace_is_estimated,
+        "is_cycling": _is_cycling_type(activity.activity_type) if activity else False,
         # Carried forward on the Prev/Next links themselves so continued
         # navigation keeps working, not just the initial link into here.
         "nav_query_string": request.url.query,
