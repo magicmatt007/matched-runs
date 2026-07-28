@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.15.4
+- The "Pace over time" chart on a matched route's page now draws a
+  smoothed trend line (a centered moving average across nearby runs)
+  instead of connecting every single run's exact pace directly - run-to-
+  run pace naturally varies a lot with conditions, effort, and terrain,
+  which was making it hard to see whether the underlying trend was
+  actually improving. The individual dots still show each run's real,
+  unsmoothed pace (still hoverable and clickable through to that
+  activity) - only the connecting line changed. Verified the smoothing
+  math against hand-calculated values, confirmed it genuinely reduces
+  variance on a noisy alternating-pace test signal rather than just
+  passing the data through unchanged, and confirmed the few-activities
+  edge cases (a route matched from only 1-2 runs) don't crash.
+
 ## 1.15.3
 - Training Log now defaults to "Last year" instead of "Last 7 days".
 - Activity detail chart order changed to Elevation, Pace, Heart Rate.

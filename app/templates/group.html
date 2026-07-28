@@ -162,7 +162,25 @@ if (bounds.length) {
         svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="13" fill="#8b8f9a">' + formatPace(pace) + '</text>';
     }
 
-    var linePoints = points.map(function (p, i) { return xFor(i) + ',' + yFor(p.pace_s_per_km); }).join(' ');
+    // A line connecting every single run's exact pace tends to look
+    // jagged - run-to-run pace naturally varies a lot with conditions,
+    // effort, terrain, etc., which drowns out whether the underlying
+    // trend is actually improving or not. A centered moving average
+    // smooths that out into a readable trend line, while the dots below
+    // still show each run's real, unsmoothed pace for hover/click-through.
+    function movingAverage(values, windowSize) {
+        var half = Math.floor(windowSize / 2);
+        return values.map(function (_, i) {
+            var start = Math.max(0, i - half);
+            var end = Math.min(values.length, i + half + 1);
+            var window = values.slice(start, end);
+            return window.reduce(function (a, b) { return a + b; }, 0) / window.length;
+        });
+    }
+
+    var windowSize = Math.min(5, paces.length);
+    var smoothedPaces = movingAverage(paces, windowSize);
+    var linePoints = smoothedPaces.map(function (v, i) { return xFor(i) + ',' + yFor(v); }).join(' ');
     svg += '<polyline points="' + linePoints + '" fill="none" stroke="#fc5200" stroke-width="2" />';
 
     points.forEach(function (p, i) {
