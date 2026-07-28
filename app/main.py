@@ -1068,10 +1068,10 @@ def _year_window(offset: int):
 
 
 @app.get("/log", response_class=HTMLResponse)
-def training_log(request: Request, type: str = None, period: str = "7d",
+def training_log(request: Request, type: str = None, period: str = "1y",
                   offset: int = 0, month: str = None, db: Session = Depends(get_db)):
     if period not in ("7d", "4w", "1y"):
-        period = "7d"
+        period = "1y"
     if offset < 0:
         offset = 0
 

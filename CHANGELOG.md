@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.15.3
+- Training Log now defaults to "Last year" instead of "Last 7 days".
+- Activity detail chart order changed to Elevation, Pace, Heart Rate.
+- Fixed the heart rate chart's y-axis labels being clipped ("158 bpm"
+  showing as unreadable) - same root cause and same fix as the pace
+  chart's clipping fixed last time: the axis labels included the full
+  " bpm" unit, needing more room than was reserved for them. Applied the
+  same fix to the elevation chart too, even though it wasn't reported as
+  broken, since the same reasoning applies and the chart title already
+  states the unit either way. Confirmed the exact clipping amount
+  ("158 bpm" needing 50px in only 38px of space) before fixing it, and
+  confirmed the fix leaves 16-24px of margin for realistic heart rate
+  values. Average-line labels and the hover tooltip keep the full unit,
+  since only the axis itself was short on room.
+
 ## 1.15.2
 - Fixed a brief pause (e.g. stopping for a photo at a summit) producing a
   wildly inflated pace value that dominated the whole chart's y-axis

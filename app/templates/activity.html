@@ -127,6 +127,11 @@ window.matchedRunsHideMapPoint = function () {
 
 {% if chart_points %}
 <div class="panel">
+    <h3 style="margin-top:0;">Elevation (m)</h3>
+    <div id="elevation-chart"></div>
+</div>
+
+<div class="panel">
     <h3 style="margin-top:0;">{% if is_cycling %}Speed (km/h){% else %}Pace (min/km){% endif %}</h3>
     <div id="pace-chart"></div>
     {% if pace_is_estimated %}
@@ -135,11 +140,6 @@ window.matchedRunsHideMapPoint = function () {
         was tracked) - the overall shape is representative, but won't be as
         precise as activities with exact per-point timestamps.</p>
     {% endif %}
-</div>
-
-<div class="panel">
-    <h3 style="margin-top:0;">Elevation (m)</h3>
-    <div id="elevation-chart"></div>
 </div>
 
 <div class="panel">
@@ -329,8 +329,17 @@ window.matchedRunsHideMapPoint = function () {
         return m + ':' + String(s).padStart(2, '0');
     }
 
-    renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation');
-    renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate');
+    renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation', {
+        // No unit on the axis itself - the chart title already says
+        // "Elevation (m)", and the axis is the tightest space in the chart.
+        formatAxisTick: function (v) { return Math.round(v); }
+    });
+    renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate', {
+        // Same reasoning - "158 bpm" doesn't fit the axis's reserved
+        // space the way "158" does, which is what was actually causing
+        // the labels to be clipped (visible in the reported screenshot).
+        formatAxisTick: function (v) { return Math.round(v); }
+    });
 
     var isCycling = {{ 'true' if is_cycling else 'false' }};
     if (isCycling) {
