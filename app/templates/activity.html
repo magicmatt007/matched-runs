@@ -17,6 +17,11 @@
     {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
     &middot; {{ activity.activity_type }}
     &middot; via {{ activity.source }}
+    {% if activity.source == "garmin" and activity.external_id %}
+    &middot; <a href="https://connect.garmin.com/modern/activity/{{ activity.external_id }}" target="_blank" rel="noopener noreferrer">View on Garmin Connect &#8599;</a>
+    {% elif activity.source == "strava" and activity.external_id %}
+    &middot; <a href="https://www.strava.com/activities/{{ activity.external_id }}" target="_blank" rel="noopener noreferrer">View on Strava &#8599;</a>
+    {% endif %}
 </p>
 
 <div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.15.5
+- Activity detail pages now link to the original activity on Garmin
+  Connect or Strava (opens in a new tab), right next to where the source
+  is already shown. Only appears for activities that actually came from
+  those two sources - file-based imports (GPX/FIT/TCX) have no external
+  page to link to, so nothing shows there. Verified the URL formats
+  against each service's own documentation rather than assuming from
+  memory (Strava's own help center confirms the exact pattern), confirmed
+  the right link appears for the right source and never the wrong one,
+  and confirmed a defensive fallback for the unexpected case of a Garmin/
+  Strava activity somehow missing its external ID, which would otherwise
+  produce a broken link.
+
 ## 1.15.4
 - The "Pace over time" chart on a matched route's page now draws a
   smoothed trend line (a centered moving average across nearby runs)
