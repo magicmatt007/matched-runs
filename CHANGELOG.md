@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.16.2
+- Made the ingress-limit warnings explicit about the actual port number
+  (8000, not Home Assistant's own 8123) rather than just saying "direct
+  port" - prompted by the same local-IP-but-wrong-port mix-up happening
+  twice now. Using the local network IP address alone doesn't bypass
+  ingress; Home Assistant's own port (8123) still routes through it
+  regardless of whether the address is local or public - it's
+  specifically the port number that matters. Updated this in both
+  warnings (database import and bulk activity import) and the client-side
+  pre-flight alert.
+
+## 1.16.1
+- Added guidance to the bulk activity import section about upload size
+  limits imposed by whatever's in front of this app (not by the app
+  itself) - previously only the database import had this kind of warning.
+  Prompted by a real report of a large folder upload failing with a
+  Cloudflare "413 Payload Too Large" error after several minutes, when
+  accessed through a Cloudflare Tunnel: confirmed directly against
+  Cloudflare's own documentation that this is a hard, plan-dependent limit
+  (100MB on Free/Pro, 200MB on Business) entirely separate from Home
+  Assistant's own ~16MB ingress limit already documented here - both can
+  independently reject a large import before it ever reaches this app.
+  The fix in both cases is the same: use the direct local network URL for
+  large imports, which bypasses both proxy layers at once.
+
 ## 1.16.0
 - **Fixed a real duplicate-activity bug**: re-uploading a file (e.g. to
   pick up the 1.15.8 TCX distance fix) created a second activity instead

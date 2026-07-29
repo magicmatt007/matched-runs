@@ -41,10 +41,13 @@
         ingress sidebar right now. If your database is larger than ~16MB,
         <strong>importing</strong> it here will fail with "Maximum request
         body size exceeded" - that's a hardcoded Supervisor limit on
-        ingress traffic, not something this app can work around. Use the
-        direct port instead for the import specifically, e.g.
-        <code>http://&lt;your-ha-host&gt;:8000/manage</code> - export/download
-        isn't affected, only import.</p>
+        ingress traffic, not something this app can work around. Use
+        <strong>port 8000</strong> instead for the import specifically -
+        <code>http://&lt;your-ha-host&gt;:8000/manage</code> - not port
+        8123 (Home Assistant's own port still goes through the same
+        ingress limit even on your local network - it's specifically the
+        port number that matters here, not whether the address is local or
+        public). Export/download isn't affected, only import.</p>
     {% endif %}
     <div class="row">
         <a class="button" href="{{ base_path }}/manage/export-db">Export database</a>
@@ -65,6 +68,21 @@
 
 <section class="panel">
     <h2>Import activities</h2>
+    <p class="muted">A large bulk import (a full export folder, especially
+        with many activities) can hit an upload size limit imposed by
+        whatever's in front of this app, not by the app itself - Home
+        Assistant's ingress caps requests at about 16MB, and a Cloudflare
+        Tunnel or similar reverse proxy commonly caps them around 100MB on
+        free/pro plans. If a large import fails partway through with a
+        "413" or "Payload Too Large" error (possibly showing a Cloudflare
+        or Home Assistant error page rather than anything from this app),
+        that's what's happening. Use <strong>port 8000</strong> for large
+        imports instead - <code>http://&lt;your-ha-host&gt;:8000/manage</code> -
+        not Home Assistant's own port 8123, which still goes through
+        ingress even on your local network and hits the same 16MB limit;
+        it's specifically the port number that matters, not whether the
+        address is local or public. Port 8000 bypasses both limits at
+        once.</p>
     <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row">
         <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz,.csv">
         <button type="submit">Upload selected files</button>
@@ -389,8 +407,10 @@
                         'This file is ' + (file.size / (1024 * 1024)).toFixed(1) + 'MB - larger than ' +
                         'Home Assistant\'s ingress can handle (about 16MB). Importing it here would ' +
                         'hang or fail partway through instead of actually working.\n\n' +
-                        'Use the direct port instead for this import specifically, e.g.\n' +
-                        'http://<your-ha-host>:8000/manage'
+                        'Use port 8000 instead for this import specifically, e.g.\n' +
+                        'http://<your-ha-host>:8000/manage\n\n' +
+                        '(not port 8123 - that\'s Home Assistant\'s own port and still goes ' +
+                        'through the same ingress limit even on your local network)'
                     );
                     return;
                 }
