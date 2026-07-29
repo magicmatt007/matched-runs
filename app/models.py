@@ -57,6 +57,13 @@ class Activity(Base):
     # consecutive points), which isn't recorded directly the way
     # elevation/heart rate are.
     time_profile_json = Column(Text, nullable=True)
+    # The real Strava activity ID, backfilled from the "Activity ID"
+    # column in Strava's own activities.csv bulk export - deliberately
+    # NOT derived from the exported filename (confirmed via direct
+    # testing that a filename-based guess produces links to entirely
+    # different people's activities). Only ever populated for file-based
+    # imports; live Strava sync already has the real ID in external_id.
+    strava_activity_id = Column(String, nullable=True)
 
     group_id = Column(Integer, ForeignKey("route_groups.id"), nullable=True)
     group = relationship("RouteGroup", back_populates="activities")
@@ -91,30 +98,21 @@ class Activity(Base):
         For live Garmin/Strava sync, external_id is already the numeric
         activity ID used directly in that service's own activity URLs.
 
-        For a file-based import (GPX/FIT/TCX), external_id is the
-        filename - Strava's bulk export specifically names each raw
-        activity file after its real Strava activity ID (e.g.
-        "971607640.gpx", "1243401459.fit.gz"), so a purely-numeric
-        filename stem is a reliable signal it came from there. This is
-        deliberately NOT based on the "Activity ID" column in Strava's own
-        activities.csv - Strava's community forum has confirmed real cases
-        of that column being mismatched to a different activity than the
-        one actually being viewed, which would make a link built from it
-        actively wrong rather than merely unavailable.
+        For a file-based import, only strava_activity_id (backfilled from
+        the "Activity ID" column in Strava's own activities.csv, if that
+        was uploaded) is used. An earlier version of this tried treating a
+        purely-numeric filename as the activity ID directly, on the theory
+        that activities.csv's own Activity ID column couldn't be trusted -
+        that theory was wrong: confirmed via direct testing that the
+        filename-based guess produced links to other people's activities
+        entirely, while activities.csv's Activity ID column is correct.
         """
-        if not self.external_id:
-            return None
-        if self.source == "garmin":
+        if self.source == "garmin" and self.external_id:
             return f"https://connect.garmin.com/modern/activity/{self.external_id}"
-        if self.source == "strava":
+        if self.source == "strava" and self.external_id:
             return f"https://www.strava.com/activities/{self.external_id}"
-        if self.source in ("gpx", "fit", "tcx"):
-            basename = self.external_id.rsplit("/", 1)[-1]
-            if basename.lower().endswith(".gz"):
-                basename = basename[:-3]
-            stem = basename.rsplit(".", 1)[0] if "." in basename else basename
-            if stem.isdigit():
-                return f"https://www.strava.com/activities/{stem}"
+        if self.strava_activity_id:
+            return f"https://www.strava.com/activities/{self.strava_activity_id}"
         return None
 
 

@@ -185,7 +185,8 @@ def _run_import_sync(files_data, name_overrides, job):
             parsed = result["parsed"]
 
             base_filename = filename.rsplit("/", 1)[-1].strip().lower()
-            final_name = name_overrides.get(base_filename) or parsed["name"]
+            csv_override = name_overrides.get(base_filename) or {}
+            final_name = csv_override.get("title") or parsed["name"]
 
             status, activity = _save_activity(
                 db, source=source, external_id=filename,
@@ -201,6 +202,7 @@ def _run_import_sync(files_data, name_overrides, job):
                 elevation_profile=parsed.get("elevation_profile"),
                 heart_rate_profile=parsed.get("heart_rate_profile"),
                 time_profile=parsed.get("time_profile"),
+                strava_activity_id=csv_override.get("activity_id"),
             )
             if status == "added":
                 added += 1
@@ -213,15 +215,27 @@ def _run_import_sync(files_data, name_overrides, job):
         t_save_done = time.time()
         logger.info("[import] sequential save phase finished in %.1fs", t_save_done - t_parse_done)
 
-        # Backfill names on already-imported activities too, in case
-        # activities.csv was uploaded separately from (before or after) the
-        # actual activity files.
+        # Backfill names (and Strava activity IDs, for the "View on
+        # Strava" link) on already-imported activities too, in case
+        # activities.csv was uploaded separately from (before or after)
+        # the actual activity files - or, for activity IDs specifically,
+        # for activities imported before that was tracked at all.
         if name_overrides:
             for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
                 base = (act.external_id or "").rsplit("/", 1)[-1].strip().lower()
-                better_name = name_overrides.get(base)
+                override = name_overrides.get(base)
+                if not override:
+                    continue
+                changed_here = False
+                better_name = override.get("title")
                 if better_name and act.name != better_name:
                     act.name = better_name
+                    changed_here = True
+                activity_id = override.get("activity_id")
+                if activity_id and act.strava_activity_id != activity_id:
+                    act.strava_activity_id = activity_id
+                    changed_here = True
+                if changed_here:
                     updated += 1
         t_backfill_done = time.time()
         if name_overrides:
@@ -309,7 +323,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     elevation_loss_m=None, avg_heart_rate=None,
                     max_heart_rate=None, avg_cadence=None, calories=None,
                     elevation_profile=None, heart_rate_profile=None,
-                    time_profile=None):
+                    time_profile=None, strava_activity_id=None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
@@ -321,6 +335,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         "max_heart_rate": max_heart_rate,
         "avg_cadence": avg_cadence,
         "calories": calories,
+        "strava_activity_id": strava_activity_id,
     }
     # Stored as JSON text, so encoded once here rather than repeating the
     # same json.dumps(...) at each of the three places these get written.
@@ -545,7 +560,7 @@ async def upload_gpx(request: Request):
             try:
                 found = parse_strava_activities_csv(content)
                 name_overrides.update(found)
-                logger.info("Loaded %d titles from %s", len(found), filename)
+                logger.info("Loaded %d entries (titles/activity IDs) from %s", len(found), filename)
             except Exception as e:
                 logger.warning("Failed to parse %s: %s", filename, e)
         else:

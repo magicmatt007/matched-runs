@@ -1,5 +1,5 @@
 name: "Matched Runs"
-version: "1.15.6"
+version: "1.15.7"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -

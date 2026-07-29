@@ -54,5 +54,6 @@ def run_migrations():
     ensure_column("activities", "elevation_profile_json", "TEXT")
     ensure_column("activities", "heart_rate_profile_json", "TEXT")
     ensure_column("activities", "time_profile_json", "TEXT")
+    ensure_column("activities", "strava_activity_id", "VARCHAR")
 
     conn.close()

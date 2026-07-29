@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.15.7
+- **Fixed a real bug from 1.15.6**: the "View on Strava" links added for
+  Strava bulk-exported GPX/FIT/TCX activities could point to a completely
+  unrelated activity belonging to a different person entirely. The
+  previous version treated a purely-numeric exported filename (e.g.
+  "971607640.gpx") as if it were the real Strava activity ID - confirmed
+  via direct testing that this assumption was simply wrong, contradicting
+  the (misread) research behind it. Removed that filename-based guess
+  entirely.
+  - The correct, verified-working source is the "Activity ID" column in
+    Strava's own activities.csv, which is now parsed and backfilled onto
+    each matching activity as a dedicated field (not reusing external_id,
+    which stays as the filename for other purposes like duplicate
+    detection).
+  - For activities that already picked up an incorrect link under 1.15.6:
+    the link will simply not show at all now (safe default) until you
+    re-upload activities.csv - no need to re-upload the GPX/FIT/TCX files
+    themselves, since existing activities get backfilled the same way
+    names already do.
+  - Verified directly against the actual property code (not a rewritten
+    stand-in) that the dangerous filename-based path is completely gone,
+    and that the correct field-based path produces the right link even
+    when the misleading filename number is a totally different value from
+    the real activity ID - reproducing the exact scenario reported.
+
 ## 1.15.6
 - Added the same external Garmin Connect/Strava links to the route page's
   activities table (which already had a Source column), not just the
