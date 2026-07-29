@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.15.6
+- Added the same external Garmin Connect/Strava links to the route page's
+  activities table (which already had a Source column), not just the
+  activity detail page.
+- These links now also work for activities imported via Strava's bulk
+  export, not just live-synced ones - previously only source=="strava"
+  (live sync) got a link. Strava names each raw exported file after its
+  real activity ID (e.g. "971607640.gpx"), which is both already stored
+  as this app's external_id for file imports and a more reliable source
+  for the ID than it first seems: Strava's own community forum has
+  documented real cases of the "Activity ID" column in activities.csv
+  itself being mismatched to a completely different activity, which
+  would make a link built from that column actively wrong rather than
+  merely unavailable. Only a purely-numeric filename is treated as a
+  Strava ID, so a normally-named GPX/FIT/TCX file correctly gets no link
+  rather than a guess.
+- Refactored both pages to share one property (external_activity_url)
+  instead of duplicating the same source-based logic in two templates.
+  Verified directly against the actual code in models.py (not a rewritten
+  equivalent) across every source/filename combination: live Garmin,
+  live Strava, bulk-export GPX/FIT/TCX (including gzipped and with a
+  folder path prefix), a hand-named file that's correctly excluded, and
+  missing/empty IDs that would otherwise produce a broken link.
+
 ## 1.15.5
 - Activity detail pages now link to the original activity on Garmin
   Connect or Strava (opens in a new tab), right next to where the source

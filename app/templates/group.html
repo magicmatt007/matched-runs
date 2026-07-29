@@ -78,7 +78,13 @@
             <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
             <td>{{ a.duration_s | hms }}</td>
             <td>{{ a | pace }}</td>
-            <td>{{ a.source }}</td>
+            <td>
+                {% if a.external_activity_url %}
+                <a href="{{ a.external_activity_url }}" target="_blank" rel="noopener noreferrer">{{ a.source }} &#8599;</a>
+                {% else %}
+                {{ a.source }}
+                {% endif %}
+            </td>
         </tr>
     {% endfor %}
     </tbody>

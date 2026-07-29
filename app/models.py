@@ -83,6 +83,40 @@ class Activity(Base):
     def time_profile(self):
         return json.loads(self.time_profile_json) if self.time_profile_json else None
 
+    @property
+    def external_activity_url(self):
+        """Link to this activity on the original service's website, if
+        one can be determined - None otherwise.
+
+        For live Garmin/Strava sync, external_id is already the numeric
+        activity ID used directly in that service's own activity URLs.
+
+        For a file-based import (GPX/FIT/TCX), external_id is the
+        filename - Strava's bulk export specifically names each raw
+        activity file after its real Strava activity ID (e.g.
+        "971607640.gpx", "1243401459.fit.gz"), so a purely-numeric
+        filename stem is a reliable signal it came from there. This is
+        deliberately NOT based on the "Activity ID" column in Strava's own
+        activities.csv - Strava's community forum has confirmed real cases
+        of that column being mismatched to a different activity than the
+        one actually being viewed, which would make a link built from it
+        actively wrong rather than merely unavailable.
+        """
+        if not self.external_id:
+            return None
+        if self.source == "garmin":
+            return f"https://connect.garmin.com/modern/activity/{self.external_id}"
+        if self.source == "strava":
+            return f"https://www.strava.com/activities/{self.external_id}"
+        if self.source in ("gpx", "fit", "tcx"):
+            basename = self.external_id.rsplit("/", 1)[-1]
+            if basename.lower().endswith(".gz"):
+                basename = basename[:-3]
+            stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+            if stem.isdigit():
+                return f"https://www.strava.com/activities/{stem}"
+        return None
+
 
 class StravaToken(Base):
     """Single-row table holding the OAuth token for the (single) app user."""
