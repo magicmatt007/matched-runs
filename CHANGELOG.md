@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.15.9
+- **Fixed a crash introduced in 1.15.8**: "Import failed:
+  app.models.Activity() got multiple values for keyword argument
+  'distance_m'". Cause: 1.15.8 added distance_m to a dict that gets
+  spread into Activity(...) with **, but distance_m was already being
+  passed to that same call explicitly - Python correctly rejected the
+  duplicate. This only affected saving a brand-new activity; re-uploading
+  an already-imported one to correct its distance (the actual point of
+  that change) was unaffected.
+  - This should have been caught before shipping 1.15.8. My testing at
+    the time only inspected two of the three code paths that use the
+    shared field dictionary, not the one that actually broke. This time,
+    verified by actually executing all three paths against the real
+    function code (not just reading it), including reproducing the exact
+    reported error against the old structure first to confirm the test
+    would have caught it, then confirming the fix resolves all three.
+
 ## 1.15.8
 - Fixed a TCX activity showing 0.01 km instead of its real distance
   (confirmed on the actual reported file: an 82km ride). Root cause,

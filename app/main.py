@@ -329,7 +329,6 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
 
     extra_fields = {
-        "distance_m": distance_m,
         "elevation_gain_m": elevation_gain_m,
         "elevation_loss_m": elevation_loss_m,
         "avg_heart_rate": avg_heart_rate,
@@ -356,6 +355,15 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
             changed = True
         if name and existing.name != name:
             existing.name = name
+            changed = True
+        # distance_m is handled explicitly here (not via extra_fields,
+        # unlike the other simple fields below) because it's ALSO passed
+        # explicitly to Activity() further down in the new-activity branch
+        # - adding it to extra_fields as well caused Python to raise
+        # "got multiple values for keyword argument 'distance_m'" there,
+        # since **extra_fields would then supply it a second time.
+        if existing.distance_m != distance_m:
+            existing.distance_m = distance_m
             changed = True
         for field, value in extra_fields.items():
             if value is not None and getattr(existing, field) != value:
