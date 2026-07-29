@@ -329,6 +329,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
 
     extra_fields = {
+        "distance_m": distance_m,
         "elevation_gain_m": elevation_gain_m,
         "elevation_loss_m": elevation_loss_m,
         "avg_heart_rate": avg_heart_rate,

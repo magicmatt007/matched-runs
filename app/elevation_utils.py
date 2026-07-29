@@ -9,6 +9,7 @@ than a proper device-computed total (raw GPS/barometric altitude jitter
 inflates both gain and loss somewhat), but it's a reasonable approximation
 without pulling in a smoothing dependency.
 """
+import math
 
 
 def gain_loss_from_elevations(elevations):
@@ -34,3 +35,27 @@ def gain_loss_from_elevations(elevations):
         prev = e
 
     return gain, loss
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(min(1, math.sqrt(a)))
+
+
+def track_length(points):
+    """Total GPS-derived distance (meters) along a list of (lat, lon)
+    points - used as a fallback when a format's own reported distance is
+    missing or unreliable (confirmed in practice: some TCX exports carry
+    only a single, obviously-wrong Lap-level DistanceMeters like 9.9m for
+    an 82km ride, with no per-trackpoint distance at all - GPS positions
+    were present and correct throughout, so summing consecutive-point
+    distances gives the real total instead of trusting that broken
+    summary field)."""
+    total = 0.0
+    for i in range(1, len(points)):
+        total += haversine(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
+    return total

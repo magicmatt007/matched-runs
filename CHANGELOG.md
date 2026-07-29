@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.15.8
+- Fixed a TCX activity showing 0.01 km instead of its real distance
+  (confirmed on the actual reported file: an 82km ride). Root cause,
+  found by inspecting the file directly: it had exactly one
+  `DistanceMeters` value in the whole file - a Lap-level summary reading
+  9.9 meters, with zero per-trackpoint distance anywhere, even though all
+  4045 trackpoints had valid GPS positions throughout. That summary value
+  is simply wrong (a device/export bug, not user error) - other TCX files
+  with a genuinely correct Lap-level summary and no per-trackpoint
+  distance still exist (this remains the fallback for indoor activities
+  with no GPS at all), so this isn't a hardcoded "ignore the summary"
+  change.
+  - Now computes GPS-derived distance (summing consecutive recorded
+    positions - the same haversine math already used for route matching)
+    as a fallback when there's no per-trackpoint distance, before ever
+    falling back to a Lap-level summary. Confirmed directly against the
+    actual reported file: GPS-derived distance comes out to 82.02 km,
+    matching what Strava itself displays (82.09 km) far more closely than
+    the broken 9.9m the file's own summary claimed.
+  - distance_m is now also included when backfilling an already-imported
+    activity on re-upload (previously only metadata like name/elevation/
+    heart rate got backfilled, not distance itself) - specifically so an
+    activity already imported with the wrong distance can be corrected by
+    simply re-uploading the same file, rather than needing to be deleted
+    and re-imported from scratch.
+  - GPX was already safe from this class of bug (it computes its own
+    GPS-derived length rather than trusting an embedded summary field at
+    all). Left FIT parsing unchanged - no evidence of the same issue
+    there, and its device-reported total_distance is generally reliable
+    when present, so this was scoped to the actual confirmed case rather
+    than applied speculatively.
+
 ## 1.15.7
 - **Fixed a real bug from 1.15.6**: the "View on Strava" links added for
   Strava bulk-exported GPX/FIT/TCX activities could point to a completely

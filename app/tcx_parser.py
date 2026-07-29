@@ -8,7 +8,7 @@ depending on which vendor produced them.
 """
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from app.elevation_utils import gain_loss_from_elevations
+from app.elevation_utils import gain_loss_from_elevations, track_length
 
 
 def _local(tag):
@@ -171,9 +171,18 @@ def parse_tcx_bytes(data: bytes, fallback_name: str = "Run"):
     if found_lap_time:
         duration_s = total_lap_time
 
-    # Prefer the cumulative distance seen on trackpoints (most granular);
-    # fall back to summed Lap-level totals if no trackpoint ever carried a
-    # DistanceMeters value at all.
+    # Prefer the cumulative distance seen on trackpoints (most granular,
+    # and reflects whatever sensor fusion the recording device itself
+    # did). If that's not available, GPS-derived distance (summing
+    # consecutive recorded positions) is next - confirmed via a real-world
+    # case where it was the only reliable distance in the file: a TCX
+    # export whose Lap-level DistanceMeters read 9.9m for what GPS
+    # positions and Strava's own display both confirmed was an 82km ride
+    # (device/export bug, not a data-entry error - the positions
+    # themselves were fine throughout). Lap-level totals are the last
+    # resort, useful mainly for indoor activities with no GPS at all.
+    if last_distance is None and len(points) >= 2:
+        last_distance = track_length(points)
     if last_distance is None and found_lap_distance:
         last_distance = total_lap_distance
 
