@@ -5,12 +5,14 @@
 
 <div class="row" style="justify-content: space-between;">
     <a href="{{ base_path }}/">&larr; back</a>
-    {% if prev_id or next_id %}
     <div class="row">
         {% if prev_id %}<a class="button secondary" href="{{ base_path }}/activity/{{ prev_id }}?{{ nav_query_string }}">&larr; Previous</a>{% endif %}
         {% if next_id %}<a class="button secondary" href="{{ base_path }}/activity/{{ next_id }}?{{ nav_query_string }}">Next &rarr;</a>{% endif %}
+        <form method="post" action="{{ base_path }}/activity/{{ activity.id }}/delete"
+              data-confirm="Delete this activity permanently? This can't be undone.">
+            <button type="submit" class="secondary">Delete</button>
+        </form>
     </div>
-    {% endif %}
 </div>
 <h2>{{ activity.name }}</h2>
 <p>

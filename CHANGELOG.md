@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.16.0
+- **Fixed a real duplicate-activity bug**: re-uploading a file (e.g. to
+  pick up the 1.15.8 TCX distance fix) created a second activity instead
+  of updating the existing one, if the file was uploaded outside its
+  original bulk-export folder structure. Root cause: file-based
+  external_id stored the full uploaded path (e.g.
+  "export_98765/activities/123.tcx.gz"), which a standalone re-upload of
+  the same file doesn't have ("123.tcx.gz") - so the "does this activity
+  already exist" check never matched, and the same-source duplicate check
+  doesn't apply within one source either.
+  - New uploads now store external_id as just the filename, not the full
+    path.
+  - Existing activities get this normalized automatically on next
+    startup, handled defensively: if two different activities would
+    collide on the same basename (very unlikely, but the database has a
+    uniqueness constraint on this), the normalization is skipped for that
+    one with a warning logged, rather than crashing the whole migration.
+  - Verified against a full reproduction of the actual reported sequence:
+    a pre-fix database with the old path-prefixed ID, through the
+    migration, through a simulated re-upload - confirmed it now correctly
+    updates the existing row instead of creating a duplicate.
+- Added the ability to delete a single activity (no such feature existed
+  before this), needed to clean up activities already duplicated by the
+  bug above. A "Delete" button now appears on the activity detail page
+  with a confirmation prompt. Deleting an activity that was the last one
+  in its matched route group also removes the now-empty group; deleting
+  one of several leaves the group and its other activities untouched.
+  Verified by executing the actual route logic (not just reading it)
+  across all of: last-activity-in-group, one-of-several, no group at all,
+  and a nonexistent activity ID.
+- This module's own earlier miss (the 1.15.9 crash from incomplete
+  testing) changed how this was verified: every piece of this fix -
+  the migration, the collision handling, the full bug reproduction, and
+  the new delete route across all its branches - was actually executed
+  against realistic data before shipping, not just read back for a second
+  time.
+
 ## 1.15.9
 - **Fixed a crash introduced in 1.15.8**: "Import failed:
   app.models.Activity() got multiple values for keyword argument

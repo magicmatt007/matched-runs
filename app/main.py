@@ -188,8 +188,17 @@ def _run_import_sync(files_data, name_overrides, job):
             csv_override = name_overrides.get(base_filename) or {}
             final_name = csv_override.get("title") or parsed["name"]
 
+            # Basename only, not the full uploaded path - a folder-based
+            # bulk upload and a single re-uploaded file (e.g. to pick up a
+            # parser fix) produce different paths for the exact same real
+            # file, which silently created a duplicate activity instead of
+            # updating the existing one (confirmed in practice - see
+            # database.py's one-time normalization of already-imported
+            # activities to this same basename-only form).
+            external_id = filename.rsplit("/", 1)[-1]
+
             status, activity = _save_activity(
-                db, source=source, external_id=filename,
+                db, source=source, external_id=external_id,
                 name=final_name, points=parsed["points"],
                 distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
                 start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
@@ -1047,6 +1056,31 @@ def activity_detail(activity_id: int, request: Request, db: Session = Depends(ge
         # navigation keeps working, not just the initial link into here.
         "nav_query_string": request.url.query,
     })
+
+
+@app.post("/activity/{activity_id}/delete")
+def delete_activity(activity_id: int, request: Request, db: Session = Depends(get_db)):
+    """Deletes a single activity - e.g. to clean up a duplicate created by
+    an old bug (fixed in 1.16.0) where re-uploading a file from outside
+    its original bulk-export folder structure created a second activity
+    instead of updating the existing one.
+
+    Uses a targeted cleanup rather than a full rebuild_groups() call:
+    removing one activity doesn't change whether any of the OTHER
+    activities in its group still match each other (that comparison never
+    involved the deleted one), so the only thing that can actually change
+    is whether the group is now empty."""
+    activity = db.query(Activity).filter_by(id=activity_id).first()
+    if activity:
+        old_group_id = activity.group_id
+        db.delete(activity)
+        db.commit()
+        if old_group_id:
+            remaining = db.query(Activity).filter_by(group_id=old_group_id).count()
+            if remaining == 0:
+                db.query(RouteGroup).filter_by(id=old_group_id).delete()
+                db.commit()
+    return local_redirect(request, "/")
 
 
 # ---------------- Training log (period-based view, grouped by month for 1y) ----------------
