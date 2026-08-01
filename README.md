@@ -20,6 +20,12 @@ called an "add-on") instead of, or alongside, plain `docker compose` - both
 use the exact same Dockerfile and code, just two different ways of
 launching the same container.
 
+[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fmagicmatt007%2Fmatched-runs)
+
+If the button above doesn't pre-fill the dialog (a currently-known issue
+with this specific link type - it may just open the store instead), add it
+manually instead:
+
 1. In Home Assistant: Settings → Add-ons → Add-on Store → ⋮ (top right) →
    Repositories → add this repo's URL.
 2. Find "Matched Runs" in the store and install it.
