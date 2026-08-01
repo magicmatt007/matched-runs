@@ -90,7 +90,7 @@
         <tbody>
         {% for a in activities %}
             <tr>
-                <td>{{ a.start_time.strftime("%Y-%m-%d") if a.start_time else "-" }}</td>
+                <td>{% if a.start_time %}<span data-utc-date="{{ a.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ a.start_time.strftime("%Y-%m-%d") }}</span>{% else %}-{% endif %}</td>
                 <td><a href="{{ base_path }}/activity/{{ a.id }}?list=log&log_type={{ selected_type }}&period={{ period }}&offset={{ offset }}{% if current_month %}&month={{ current_month }}{% endif %}">{{ a.name }}</a></td>
                 <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
                 <td>{{ a.duration_s | hms }}</td>

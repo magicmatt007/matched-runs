@@ -16,7 +16,7 @@
 </div>
 <h2>{{ activity.name }}</h2>
 <p>
-    {{ activity.start_time.strftime("%Y-%m-%d %H:%M") if activity.start_time else "" }}
+    {% if activity.start_time %}<span data-utc-datetime="{{ activity.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.start_time.strftime("%Y-%m-%d %H:%M") }}</span>{% endif %}
     &middot; {{ activity.activity_type }}
     &middot; via {{ activity.source }}
     {% if activity.external_activity_url %}

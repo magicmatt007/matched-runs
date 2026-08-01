@@ -72,7 +72,7 @@
     <tbody>
     {% for a in activities %}
         <tr>
-            <td>{{ a.start_time.strftime("%Y-%m-%d") if a.start_time else "-" }}</td>
+            <td>{% if a.start_time %}<span data-utc-date="{{ a.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ a.start_time.strftime("%Y-%m-%d") }}</span>{% else %}-{% endif %}</td>
             <td><a href="{{ base_path }}/activity/{{ a.id }}?{{ activity_context_query('group', carry_params) }}&group_id={{ group.id }}">{{ a.name }}</a></td>
             <td>{{ a.activity_type }}</td>
             <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
@@ -196,7 +196,7 @@ if (bounds.length) {
         var fill = isLast ? '#fc5200' : '#1d212b';
         svg += '<a href="{{ base_path }}/activity/' + p.activity_id + '">' +
                '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="#fc5200" stroke-width="2">' +
-               '<title>' + p.date + ' - ' + formatPace(p.pace_s_per_km) + '</title>' +
+               '<title>' + (window.matchedRunsFormatLocalDate ? window.matchedRunsFormatLocalDate(p.date_utc) : p.date_utc) + ' - ' + formatPace(p.pace_s_per_km) + '</title>' +
                '</circle></a>';
     });
 
