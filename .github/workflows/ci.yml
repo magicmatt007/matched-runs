@@ -1,0 +1,54 @@
+name: CI
+
+# Runs on every push (so problems surface as you work on a branch, not
+# just at merge time) and on every pull request targeting main (so main
+# is gated on all of this passing, not just on manually remembering to
+# run these checks yourself before merging).
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare /data directory
+        # The app hardcodes /data as its persistent storage location -
+        # correct for its real deployment (Docker/Home Assistant both
+        # already provide this, writable, as the container's own
+        # filesystem), but this bare runner needs it created explicitly
+        # first, owned by the user these steps run as.
+        run: sudo mkdir -p /data && sudo chown "$(whoami)" /data
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install CI-only tooling
+        # PyYAML isn't a runtime dependency of the app itself - config.yaml
+        # is read by Home Assistant's Supervisor, never parsed by this
+        # app's own code - so it's installed here rather than added to
+        # requirements.txt, which should only list what the app actually
+        # needs to run.
+        run: pip install pyyaml
+
+      - name: Compile check (catches syntax errors)
+        run: python -m py_compile app/*.py garmin_login.py docker_entrypoint.py
+
+      - name: Route/decorator safety check
+        run: python scripts/check_routes.py
+
+      - name: Template syntax check
+        run: python scripts/check_templates.py
+
+      - name: Import sanity check (catches missing deps / import-time errors)
+        run: python -c "import app.main"
+
+      - name: Validate config.yaml
+        run: python -c "import yaml; yaml.safe_load(open('config.yaml'))"

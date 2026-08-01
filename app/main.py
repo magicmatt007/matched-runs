@@ -810,7 +810,7 @@ def group_detail(group_id: int, request: Request, page: int = 1,
     )
     chart_points = [
         {
-            "date": a.start_time.strftime("%Y-%m-%d"),
+            "date_utc": a.start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "pace_s_per_km": a.duration_s / (a.distance_m / 1000.0),
             "activity_id": a.id,
         }

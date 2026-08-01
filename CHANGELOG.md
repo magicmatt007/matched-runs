@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.16.3
+- Activity dates and times now display in the viewer's actual local time
+  instead of raw UTC (all sources - GPX, FIT, TCX, Garmin, Strava -
+  consistently store timestamps as UTC, which was previously shown
+  as-is with no conversion at all). Converted client-side in the browser
+  rather than on the server, since the server can't reliably know what
+  timezone the viewer is actually in - a self-hosted app can easily be
+  viewed from a different timezone than the server itself.
+  - Falls back to showing the UTC time if JavaScript is unavailable,
+    rather than showing nothing.
+  - Verified the actual conversion math (not just that code runs) against
+    several real timezones, including the trickiest part - dates that
+    roll over to the next (or previous) calendar day once shifted out of
+    UTC - and confirmed DST transitions are handled correctly using the
+    browser's own timezone database rather than a fixed offset.
+  - This also fixed the group page's pace-over-time chart tooltips, which
+    had the same issue via a different mechanism (a pre-formatted date
+    string embedded in the chart's data rather than a template-rendered
+    value) - now uses a shared conversion helper instead of duplicating
+    the logic.
+
 ## 1.16.2
 - Made the ingress-limit warnings explicit about the actual port number
   (8000, not Home Assistant's own 8123) rather than just saying "direct
