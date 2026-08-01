@@ -19,6 +19,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Prepare /data directory
+        # The app hardcodes /data as its persistent storage location -
+        # correct for its real deployment (Docker/Home Assistant both
+        # already provide this, writable, as the container's own
+        # filesystem), but this bare runner needs it created explicitly
+        # first, owned by the user these steps run as.
+        run: sudo mkdir -p /data && sudo chown "$(whoami)" /data
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
