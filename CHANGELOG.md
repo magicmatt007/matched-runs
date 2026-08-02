@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.16.4
+- The activity filters (on both the main activity list and a matched
+  route's page) now collapse behind a "Filters" toggle on mobile-width
+  screens, instead of always taking up the same space as on desktop.
+  Desktop is unaffected - filters stay expanded there as before, since
+  space isn't the problem there.
+  - Any currently-active filters now show as individual chips (e.g.
+    `Name: "Urdorf"`, `Distance: 10-20 km`) rather than just a plain
+    count - visible even while the panel itself is collapsed, so it's
+    never ambiguous what's actually narrowing the list. Each chip has its
+    own "x" to remove just that one filter without opening the full
+    panel.
+  - Both pages now share one filter panel implementation instead of two
+    separately-maintained copies of the same form.
+  - Verified end-to-end against a real running instance of the app (not
+    just template rendering in isolation) - seeded an actual test
+    database, made real HTTP requests through a real FastAPI test client,
+    and confirmed: chips render with correctly-formatted labels (including
+    pace as m:ss, not raw decimal minutes), the group page correctly has
+    no "Type" filter chip/field (routes are already one type), and -
+    the specific thing that mattered most here - actually followed a
+    chip's own "x" link and confirmed only that one filter cleared while
+    the other active filters stayed exactly as they were.
+
 ## 1.16.3
 - Activity dates and times now display in the viewer's actual local time
   instead of raw UTC (all sources - GPX, FIT, TCX, Garmin, Strava -

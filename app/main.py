@@ -1,4 +1,5 @@
 import json
+from urllib.parse import urlencode
 import time
 import os
 import gzip
@@ -645,6 +646,95 @@ FILTER_PARAM_KEYS = [
 ]
 
 
+def _format_pace_minutes(value):
+    """'5.5' (decimal minutes, this app's filter convention) -> '5:30'"""
+    try:
+        total_seconds = round(float(value) * 60)
+    except (TypeError, ValueError):
+        return value
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def build_filter_chips(request: Request, filters: dict, base_url: str, selected_type: str = None):
+    """One {"label": ..., "clear_url": ...} per currently-active filter
+    GROUP (a paired min/max, like distance, collapses into a single chip
+    covering both, cleared together) - shown so it's obvious at a glance
+    which filters are actually active and what they're set to, not just
+    that something is filtering the list, and so any one of them can be
+    removed without opening the full filter panel.
+
+    clear_url reflects the current URL with only that filter's own
+    param(s) removed - everything else (sort, other filters, page size)
+    stays exactly as it was.
+    """
+    current_params = dict(request.query_params)
+
+    def clear_url_without(*keys):
+        remaining = {k: v for k, v in current_params.items() if k not in keys}
+        # The current page number may no longer make sense once a filter
+        # changes the result set's size - safer to land back on page 1
+        # than on a now-possibly-nonexistent later page.
+        remaining.pop("page", None)
+        query_string = urlencode(remaining)
+        return f"{base_url}?{query_string}" if query_string else base_url
+
+    chips = []
+
+    if selected_type:
+        chips.append({"label": f"Type: {selected_type}", "clear_url": clear_url_without("type")})
+
+    name_filter = filters.get("name_filter")
+    if name_filter:
+        chips.append({"label": f'Name: "{name_filter}"', "clear_url": clear_url_without("name_filter")})
+
+    date_from = filters.get("date_from")
+    date_to = filters.get("date_to")
+    if date_from or date_to:
+        if date_from and date_to:
+            label = f"Date: {date_from} \u2013 {date_to}"
+        elif date_from:
+            label = f"Date: from {date_from}"
+        else:
+            label = f"Date: until {date_to}"
+        chips.append({"label": label, "clear_url": clear_url_without("date_from", "date_to")})
+
+    distance_min = filters.get("distance_min")
+    distance_max = filters.get("distance_max")
+    if distance_min or distance_max:
+        if distance_min and distance_max:
+            label = f"Distance: {distance_min}\u2013{distance_max} km"
+        elif distance_min:
+            label = f"Distance: \u2265 {distance_min} km"
+        else:
+            label = f"Distance: \u2264 {distance_max} km"
+        chips.append({"label": label, "clear_url": clear_url_without("distance_min", "distance_max")})
+
+    duration_min = filters.get("duration_min")
+    duration_max = filters.get("duration_max")
+    if duration_min or duration_max:
+        if duration_min and duration_max:
+            label = f"Duration: {duration_min}\u2013{duration_max} min"
+        elif duration_min:
+            label = f"Duration: \u2265 {duration_min} min"
+        else:
+            label = f"Duration: \u2264 {duration_max} min"
+        chips.append({"label": label, "clear_url": clear_url_without("duration_min", "duration_max")})
+
+    pace_min = filters.get("pace_min")
+    pace_max = filters.get("pace_max")
+    if pace_min or pace_max:
+        if pace_min and pace_max:
+            label = f"Pace: {_format_pace_minutes(pace_min)}\u2013{_format_pace_minutes(pace_max)} /km"
+        elif pace_min:
+            label = f"Pace: \u2265 {_format_pace_minutes(pace_min)} /km"
+        else:
+            label = f"Pace: \u2264 {_format_pace_minutes(pace_max)} /km"
+        chips.append({"label": label, "clear_url": clear_url_without("pace_min", "pace_max")})
+
+    return chips
+
+
 def apply_sort_and_filters(query, request: Request):
     """Applies the shared column filters + sort order (query params: sort,
     dir, name_filter, date_from, date_to, distance_min/max in km,
@@ -773,6 +863,10 @@ def activities_list(request: Request, type: str = None, page: int = 1,
     group_ids_on_page = [a.group_id for a in activities if a.group_id]
     group_counts = _group_activity_counts(db, group_ids_on_page) if group_ids_on_page else {}
 
+    filters = {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS}
+    base_path = request.headers.get("X-Ingress-Path", "")
+    filter_chips = build_filter_chips(request, filters, f"{base_path}/", selected_type=type)
+
     return templates.TemplateResponse("activities.html", {
         "request": request,
         "activities": activities,
@@ -785,7 +879,8 @@ def activities_list(request: Request, type: str = None, page: int = 1,
         "page_size_options": PAGE_SIZE_OPTIONS,
         "sort": sort,
         "dir": direction,
-        "filters": {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS},
+        "filters": filters,
+        "filter_chips": filter_chips,
         "carry_params": build_carry_params(request),
         "group_counts": group_counts,
     })
@@ -817,6 +912,10 @@ def group_detail(group_id: int, request: Request, page: int = 1,
         for a in chart_activities
     ]
 
+    filters = {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS}
+    base_path = request.headers.get("X-Ingress-Path", "")
+    filter_chips = build_filter_chips(request, filters, f"{base_path}/group/{group_id}")
+
     return templates.TemplateResponse("group.html", {
         "request": request,
         "group": group,
@@ -828,7 +927,8 @@ def group_detail(group_id: int, request: Request, page: int = 1,
         "page_size_options": PAGE_SIZE_OPTIONS,
         "sort": sort,
         "dir": direction,
-        "filters": {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS},
+        "filters": filters,
+        "filter_chips": filter_chips,
         "carry_params": build_carry_params(request, include_type=False),
         "chart_points": chart_points,
     })

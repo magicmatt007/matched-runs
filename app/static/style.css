@@ -123,6 +123,47 @@ a { color: #6aa9ff; }
     border-radius: 6px;
     padding: 6px 10px;
 }
+
+.filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 4px;
+}
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #1d212b;
+    border: 1px solid var(--accent);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    text-decoration: none;
+    line-height: 1.4;
+}
+.filter-chip:hover { background: #262b38; }
+.filter-chip .chip-x { color: var(--accent); font-weight: bold; }
+
+/* The toggle button only exists to collapse/expand the filter panel on
+   narrow screens - on desktop the panel is simply always shown, same as
+   before this existed, so the button stays hidden there. */
+.filter-toggle {
+    display: none;
+}
+html.is-mobile .filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 4px;
+}
+html.is-mobile .filter-panel {
+    display: none;
+}
+html.is-mobile .filter-panel.expanded {
+    display: flex;
+}
 th a { color: var(--text); text-decoration: none; }
 th a:hover { color: var(--accent); }
 
