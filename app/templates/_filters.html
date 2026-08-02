@@ -1,0 +1,81 @@
+{% if filter_chips %}
+<div class="filter-chips">
+    {% for chip in filter_chips %}
+    <a class="filter-chip" href="{{ chip.clear_url }}" title="Remove this filter">{{ chip.label }} <span class="chip-x" aria-hidden="true">&times;</span></a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<button type="button" class="filter-toggle secondary" id="filter-toggle" aria-expanded="true" aria-controls="filter-panel">
+    Filters{% if filter_chips %} ({{ filter_chips|length }}){% endif %} <span id="filter-toggle-caret" aria-hidden="true">&#9662;</span>
+</button>
+
+<form method="get" action="{{ filter_form_action }}" class="row filters filter-panel" id="filter-panel" style="margin: 12px 0; flex-wrap: wrap;">
+    {% if types is defined %}
+    <div class="filter-group">
+        <label for="type">Type</label>
+        <select name="type" id="type">
+            <option value="" {% if not selected_type %}selected{% endif %}>All</option>
+            {% for t in types %}
+            <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+    <div class="filter-group">
+        <label for="name_filter">Name contains</label>
+        <input type="text" name="name_filter" id="name_filter" value="{{ filters.name_filter }}" placeholder="e.g. Urdorf">
+    </div>
+    <div class="filter-group">
+        <label for="date_from">From</label>
+        <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
+        <label for="date_to">To</label>
+        <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="filter-group">
+        <label for="distance_min">Distance km</label>
+        <input type="number" step="0.1" min="0" name="distance_min" id="distance_min" value="{{ filters.distance_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="0.1" min="0" name="distance_max" value="{{ filters.distance_max }}" placeholder="max" style="width: 70px;">
+    </div>
+    <div class="filter-group">
+        <label for="duration_min">Duration min</label>
+        <input type="number" step="1" min="0" name="duration_min" id="duration_min" value="{{ filters.duration_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="1" min="0" name="duration_max" value="{{ filters.duration_max }}" placeholder="max" style="width: 70px;">
+    </div>
+    <div class="filter-group">
+        <label for="pace_min">Pace min/km</label>
+        <input type="number" step="0.1" min="0" name="pace_min" id="pace_min" value="{{ filters.pace_min }}" placeholder="min" style="width: 70px;">
+        &ndash;
+        <input type="number" step="0.1" min="0" name="pace_max" value="{{ filters.pace_max }}" placeholder="max" style="width: 70px;">
+    </div>
+    <input type="hidden" name="page_size" value="{{ page_size }}">
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if dir %}<input type="hidden" name="dir" value="{{ dir }}">{% endif %}
+    <button type="submit">Apply filters</button>
+    {% if filter_chips %}
+    <a class="button secondary" href="{{ filter_form_action }}">Clear all filters</a>
+    {% endif %}
+</form>
+
+<script>
+(function () {
+    // The panel starts expanded (matching the pre-existing behavior on
+    // desktop, where there's no toggle at all - the CSS only shows the
+    // toggle button and hides the panel by default on narrow/mobile
+    // screens, via the same html.is-mobile class used throughout this
+    // app). This only needs to handle the mobile case: clicking the
+    // toggle to reveal or re-hide the already-collapsed panel.
+    var toggle = document.getElementById('filter-toggle');
+    var panel = document.getElementById('filter-panel');
+    var caret = document.getElementById('filter-toggle-caret');
+    if (!toggle || !panel) return;
+
+    toggle.addEventListener('click', function () {
+        var expanded = panel.classList.toggle('expanded');
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (caret) caret.innerHTML = expanded ? '&#9652;' : '&#9662;';
+    });
+})();
+</script>
