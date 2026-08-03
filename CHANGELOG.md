@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.16.7
+- **Fixed swipe navigation not working at all, on any page, since it was
+  introduced in 1.16.5.** The 1.16.6 fix (the SVG exclusion being too
+  broad) was real, but not the actual reason it never worked in the
+  first place - it was papering over a symptom of a more fundamental
+  bug underneath it. Root cause: the script is loaded from `<head>`,
+  which runs *before* the page's own content - including the very
+  Previous/Next links it looks for - exists in the DOM at all. It
+  searched for those links immediately at load time instead of waiting
+  for the page to finish loading, always found nothing, and silently did
+  nothing, on every page, regardless of which page or whether the links
+  were really there further down.
+  - This should have been caught the first time - `local-time.js` already
+    handles the exact same "loaded from head, needs the DOM to exist
+    first" situation correctly, and this script should have followed
+    that same, already-established pattern from the start rather than
+    needing a second report to find it.
+  - The previous testing gap: earlier verification tested the gesture-
+    detection math in isolation, against a mock page that was always
+    already fully loaded - which never exercises the actual failure mode
+    here, where script-tag position in the real HTML determines whether
+    anything below it exists yet. This time, verified using a real HTML
+    document parsed in the correct order (via jsdom) - confirmed the
+    previous version's listeners were never even registered in this
+    realistic setup, confirmed the fixed version's are, and confirmed the
+    same test correctly fails against the old code specifically (not just
+    passing regardless of what it's given).
+
 ## 1.16.6
 - **Fixed swipe navigation (1.16.5) not working on the training log
   page.** Root cause: the exclusion rule meant to avoid conflicting with
