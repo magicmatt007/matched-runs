@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.16.7
+- **Fixed swipe navigation not working at all, on any page, since it was
+  introduced in 1.16.5.** The 1.16.6 fix (the SVG exclusion being too
+  broad) was real, but not the actual reason it never worked in the
+  first place - it was papering over a symptom of a more fundamental
+  bug underneath it. Root cause: the script is loaded from `<head>`,
+  which runs *before* the page's own content - including the very
+  Previous/Next links it looks for - exists in the DOM at all. It
+  searched for those links immediately at load time instead of waiting
+  for the page to finish loading, always found nothing, and silently did
+  nothing, on every page, regardless of which page or whether the links
+  were really there further down.
+  - This should have been caught the first time - `local-time.js` already
+    handles the exact same "loaded from head, needs the DOM to exist
+    first" situation correctly, and this script should have followed
+    that same, already-established pattern from the start rather than
+    needing a second report to find it.
+  - The previous testing gap: earlier verification tested the gesture-
+    detection math in isolation, against a mock page that was always
+    already fully loaded - which never exercises the actual failure mode
+    here, where script-tag position in the real HTML determines whether
+    anything below it exists yet. This time, verified using a real HTML
+    document parsed in the correct order (via jsdom) - confirmed the
+    previous version's listeners were never even registered in this
+    realistic setup, confirmed the fixed version's are, and confirmed the
+    same test correctly fails against the old code specifically (not just
+    passing regardless of what it's given).
+
+## 1.16.6
+- **Fixed swipe navigation (1.16.5) not working on the training log
+  page.** Root cause: the exclusion rule meant to avoid conflicting with
+  the activity page's interactive charts was written as "skip any SVG,"
+  but the training log has its own distance chart that's also drawn as
+  an SVG - despite having no touch-drag behavior of its own to actually
+  conflict with. Since that chart is large and sits right where someone
+  would naturally try to swipe, this silently blocked the gesture there
+  entirely, with no error or feedback of any kind.
+  - Replaced the blanket "any SVG" exclusion with a precise marker
+    (`.touch-interactive`) applied only to the specific charts that
+    really do have their own touch handling (elevation/pace/heart rate,
+    on the activity detail page). Verified directly that a plain SVG
+    chart without this marker is no longer excluded, while the map and
+    the genuinely interactive charts still are - confirmed against the
+    real running app that the marker appears exactly where it should
+    (the activity page's charts) and nowhere it shouldn't (the training
+    log's own chart).
+
+## 1.16.5
+- Swipe left/right on touchscreens now works as an alternative to tapping
+  the Previous/Next buttons, on both the activity detail page and the
+  training log (in both its month-drill-down and period-based
+  navigation modes). It's not a separate mechanism - the swipe just
+  triggers whichever link the button itself already points to, so
+  there's nothing new to keep in sync if that navigation logic ever
+  changes.
+  - Deliberately ignores swipes that start on the map or inside one of
+    the elevation/pace/heart-rate charts, since both already use
+    touch-drag themselves (map panning, chart hover-to-explore) and would
+    otherwise conflict with a page-level swipe gesture meant for
+    navigation.
+  - Doesn't interfere with normal scrolling - it only ever looks at where
+    a touch started and ended, never blocks the browser's own default
+    handling of the gesture while it's happening.
+  - Verified the actual gesture-detection math directly (not just that
+    the code runs): a clear horizontal swipe in either direction
+    triggers the right navigation, small/accidental movements and normal
+    vertical scrolling are correctly ignored, a diagonal gesture with too
+    much vertical component doesn't falsely trigger, a swipe with only
+    slight vertical drift still correctly counts, multi-touch gestures
+    (e.g. pinch-zoom) are ignored entirely, and swipes starting on the
+    map or inside a chart are correctly excluded. Also confirmed against
+    the real running app that the necessary markup is actually present on
+    both real pages, in every navigation mode log.html has.
+
 ## 1.16.4
 - The activity filters (on both the main activity list and a matched
   route's page) now collapse behind a "Filters" toggle on mobile-width

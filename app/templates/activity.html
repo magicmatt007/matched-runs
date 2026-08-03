@@ -6,8 +6,8 @@
 <div class="row" style="justify-content: space-between;">
     <a href="{{ base_path }}/">&larr; back</a>
     <div class="row">
-        {% if prev_id %}<a class="button secondary" href="{{ base_path }}/activity/{{ prev_id }}?{{ nav_query_string }}">&larr; Previous</a>{% endif %}
-        {% if next_id %}<a class="button secondary" href="{{ base_path }}/activity/{{ next_id }}?{{ nav_query_string }}">Next &rarr;</a>{% endif %}
+        {% if prev_id %}<a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/activity/{{ prev_id }}?{{ nav_query_string }}">&larr; Previous</a>{% endif %}
+        {% if next_id %}<a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/activity/{{ next_id }}?{{ nav_query_string }}">Next &rarr;</a>{% endif %}
         <form method="post" action="{{ base_path }}/activity/{{ activity.id }}/delete"
               data-confirm="Delete this activity permanently? This can't be undone.">
             <button type="submit" class="secondary">Delete</button>
@@ -219,7 +219,7 @@ window.matchedRunsHideMapPoint = function () {
             return invertY ? padding.top + normalized * plotH : padding.top + plotH - normalized * plotH;
         }
 
-        var svg = '<svg id="' + containerId + '-svg" viewBox="0 0 ' + width + ' ' + height +
+        var svg = '<svg id="' + containerId + '-svg" class="touch-interactive" viewBox="0 0 ' + width + ' ' + height +
                    '" style="width:100%; height:' + height + 'px; cursor: crosshair;">';
 
         // y-axis gridlines + labels
