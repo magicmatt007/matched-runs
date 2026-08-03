@@ -26,7 +26,26 @@
         var startY = null;
 
         function isExcludedTarget(el) {
-            return !!(el && el.closest && (el.closest('#map') || el.closest('.touch-interactive')));
+            if (!el) return false;
+            if (el.closest && (el.closest('#map') || el.closest('.touch-interactive'))) return true;
+
+            // Any ancestor that's actually horizontally scrollable right
+            // now (its content is genuinely wider than it is) is assumed
+            // to have its own horizontal touch behavior that would
+            // conflict with swipe navigation - e.g. the responsive table
+            // wrapper on narrow screens, where scrolling the table
+            // sideways was triggering page navigation at the same time.
+            // General rather than a hardcoded list of specific classes,
+            // so a future horizontally-scrollable element doesn't need
+            // its own separate fix the same way this one did.
+            var node = el;
+            while (node && node !== document.body && node.nodeType === 1) {
+                if (typeof node.scrollWidth === 'number' && node.scrollWidth > node.clientWidth + 1) {
+                    return true;
+                }
+                node = node.parentElement;
+            }
+            return false;
         }
 
         // Passive throughout - this only ever reacts after the fact to where a
