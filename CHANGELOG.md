@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.16.9
+- Simplified "via garmin ... View on Garmin Connect ↗" on the activity
+  detail page down to just "via garmin ↗", with the source name itself
+  as the link - removes the redundant second phrase without losing the
+  ↗ cue that it opens elsewhere. Activities with no external page to link
+  to (e.g. hand-named GPX files) are unaffected, still showing the plain
+  source name as before.
+
+## 1.16.8
+- Fixed horizontally scrolling the training log's activity table (on
+  narrow screens, where it scrolls sideways instead of squeezing the
+  page) also triggering page swipe-navigation at the same time - the
+  same underlying conflict as the map and the activity page's charts,
+  just on an element that hadn't been accounted for.
+  - Rather than add "the responsive table" as a fourth specific special
+    case, generalized the exclusion: it now checks whether the touch
+    started on an element (or one of its ancestors) that's genuinely
+    horizontally scrollable at that moment, not a fixed list of class
+    names. A future horizontally-scrollable element added anywhere in the
+    app should be excluded automatically, rather than needing its own
+    separate bug report the way this one did.
+  - Verified directly: a touch landing on a table cell whose ancestor
+    wrapper is the one that actually scrolls is correctly excluded (the
+    realistic case, not just the wrapper div itself); a wrapper that
+    merely has the same class but isn't actually overflowing (e.g. the
+    table fits fine on a wide screen) is correctly NOT excluded, since
+    only genuine scrollability matters, not the class name alone; and the
+    map/chart exclusions and the previous fix's script-loading-order
+    behavior are both unaffected by this change.
+
 ## 1.16.7
 - **Fixed swipe navigation not working at all, on any page, since it was
   introduced in 1.16.5.** The 1.16.6 fix (the SVG exclusion being too
