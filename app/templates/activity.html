@@ -219,7 +219,7 @@ window.matchedRunsHideMapPoint = function () {
             return invertY ? padding.top + normalized * plotH : padding.top + plotH - normalized * plotH;
         }
 
-        var svg = '<svg id="' + containerId + '-svg" viewBox="0 0 ' + width + ' ' + height +
+        var svg = '<svg id="' + containerId + '-svg" class="touch-interactive" viewBox="0 0 ' + width + ' ' + height +
                    '" style="width:100%; height:' + height + 'px; cursor: crosshair;">';
 
         // y-axis gridlines + labels

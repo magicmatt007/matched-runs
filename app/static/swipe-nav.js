@@ -4,10 +4,15 @@
 // data-swipe-nav links at all.
 //
 // Deliberately ignores swipes that start on the map (Leaflet's own
-// touch-drag panning) or inside a chart (the elevation/pace/heart-rate
-// charts already use touch-drag themselves, to show a value as you drag
-// a finger across them) - both would otherwise fight with page-level
-// swipe navigation for the same gesture.
+// touch-drag panning) or on an element specifically marked
+// .touch-interactive (the elevation/pace/heart-rate charts on the
+// activity detail page already use touch-drag themselves, to show a
+// value as a finger drags across them) - both would otherwise fight with
+// page-level swipe navigation for the same gesture. This is deliberately
+// NOT a blanket "any svg" exclusion - other charts (e.g. the training
+// log's own distance chart) are also drawn as SVG but have no touch
+// interaction of their own, so excluding every SVG wholesale would
+// silently block swipe navigation somewhere it has no real conflict.
 (function () {
     var nextLink = document.querySelector('a[data-swipe-nav="next"]');
     var prevLink = document.querySelector('a[data-swipe-nav="prev"]');
@@ -20,7 +25,7 @@
     var startY = null;
 
     function isExcludedTarget(el) {
-        return !!(el && el.closest && (el.closest('#map') || el.closest('svg')));
+        return !!(el && el.closest && (el.closest('#map') || el.closest('.touch-interactive')));
     }
 
     // Passive throughout - this only ever reacts after the fact to where a

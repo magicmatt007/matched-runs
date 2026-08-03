@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.16.6
+- **Fixed swipe navigation (1.16.5) not working on the training log
+  page.** Root cause: the exclusion rule meant to avoid conflicting with
+  the activity page's interactive charts was written as "skip any SVG,"
+  but the training log has its own distance chart that's also drawn as
+  an SVG - despite having no touch-drag behavior of its own to actually
+  conflict with. Since that chart is large and sits right where someone
+  would naturally try to swipe, this silently blocked the gesture there
+  entirely, with no error or feedback of any kind.
+  - Replaced the blanket "any SVG" exclusion with a precise marker
+    (`.touch-interactive`) applied only to the specific charts that
+    really do have their own touch handling (elevation/pace/heart rate,
+    on the activity detail page). Verified directly that a plain SVG
+    chart without this marker is no longer excluded, while the map and
+    the genuinely interactive charts still are - confirmed against the
+    real running app that the marker appears exactly where it should
+    (the activity page's charts) and nowhere it shouldn't (the training
+    log's own chart).
+
 ## 1.16.5
 - Swipe left/right on touchscreens now works as an alternative to tapping
   the Previous/Next buttons, on both the activity detail page and the
