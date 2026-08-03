@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.16.9
+- Simplified "via garmin ... View on Garmin Connect ↗" on the activity
+  detail page down to just "via garmin ↗", with the source name itself
+  as the link - removes the redundant second phrase without losing the
+  ↗ cue that it opens elsewhere. Activities with no external page to link
+  to (e.g. hand-named GPX files) are unaffected, still showing the plain
+  source name as before.
+
 ## 1.16.8
 - Fixed horizontally scrolling the training log's activity table (on
   narrow screens, where it scrolls sideways instead of squeezing the

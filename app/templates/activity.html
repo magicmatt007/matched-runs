@@ -18,10 +18,7 @@
 <p>
     {% if activity.start_time %}<span data-utc-datetime="{{ activity.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.start_time.strftime("%Y-%m-%d %H:%M") }}</span>{% endif %}
     &middot; {{ activity.activity_type }}
-    &middot; via {{ activity.source }}
-    {% if activity.external_activity_url %}
-    &middot; <a href="{{ activity.external_activity_url }}" target="_blank" rel="noopener noreferrer">View on {{ "Garmin Connect" if activity.source == "garmin" else "Strava" }} &#8599;</a>
-    {% endif %}
+    &middot; via {% if activity.external_activity_url %}<a href="{{ activity.external_activity_url }}" target="_blank" rel="noopener noreferrer">{{ activity.source }} &#8599;</a>{% else %}{{ activity.source }}{% endif %}
 </p>
 
 <div class="row" style="gap: 16px; margin: 16px 0; flex-wrap: wrap;">
