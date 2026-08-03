@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.16.5
+- Swipe left/right on touchscreens now works as an alternative to tapping
+  the Previous/Next buttons, on both the activity detail page and the
+  training log (in both its month-drill-down and period-based
+  navigation modes). It's not a separate mechanism - the swipe just
+  triggers whichever link the button itself already points to, so
+  there's nothing new to keep in sync if that navigation logic ever
+  changes.
+  - Deliberately ignores swipes that start on the map or inside one of
+    the elevation/pace/heart-rate charts, since both already use
+    touch-drag themselves (map panning, chart hover-to-explore) and would
+    otherwise conflict with a page-level swipe gesture meant for
+    navigation.
+  - Doesn't interfere with normal scrolling - it only ever looks at where
+    a touch started and ended, never blocks the browser's own default
+    handling of the gesture while it's happening.
+  - Verified the actual gesture-detection math directly (not just that
+    the code runs): a clear horizontal swipe in either direction
+    triggers the right navigation, small/accidental movements and normal
+    vertical scrolling are correctly ignored, a diagonal gesture with too
+    much vertical component doesn't falsely trigger, a swipe with only
+    slight vertical drift still correctly counts, multi-touch gestures
+    (e.g. pinch-zoom) are ignored entirely, and swipes starting on the
+    map or inside a chart are correctly excluded. Also confirmed against
+    the real running app that the necessary markup is actually present on
+    both real pages, in every navigation mode log.html has.
+
 ## 1.16.4
 - The activity filters (on both the main activity list and a matched
   route's page) now collapse behind a "Filters" toggle on mobile-width

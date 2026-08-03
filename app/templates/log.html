@@ -27,18 +27,18 @@
 
 <div class="row" style="justify-content: space-between; margin: 16px 0;">
     {% if current_month %}
-        <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ prev_month }}">&laquo; Previous month</a>
+        <a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ prev_month }}">&laquo; Previous month</a>
         <strong>{{ window_start.strftime("%B %Y") }}</strong>
         {% if next_month %}
-            <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ next_month }}">Next month &raquo;</a>
+            <a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ next_month }}">Next month &raquo;</a>
         {% else %}
             <span class="muted">Next month &raquo;</span>
         {% endif %}
     {% else %}
-        <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset + 1 }}">&laquo; Previous period</a>
+        <a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset + 1 }}">&laquo; Previous period</a>
         <strong>{{ window_start.strftime("%Y-%m-%d") }} &ndash; {{ window_end.strftime("%Y-%m-%d") }}</strong>
         {% if can_go_next_period %}
-            <a class="button secondary" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset - 1 }}">Next period &raquo;</a>
+            <a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/log?type={{ selected_type }}&period={{ period }}&offset={{ offset - 1 }}">Next period &raquo;</a>
         {% else %}
             <span class="muted">Next period &raquo;</span>
         {% endif %}
