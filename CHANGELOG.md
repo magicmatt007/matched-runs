@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.17.2
+- Activity tables (main activity list, a matched route's page, and the
+  training log) no longer show a redundant activity type inside the name
+  itself when it's already shown in its own column (or, on the training
+  log, already implied by the page's own type filter) - e.g. "Antibes
+  Open Water Swimming" now displays as just "Antibes". This is purely a
+  display change - the stored name is completely untouched, still shown
+  in full on the activity detail page, and still available as a hover
+  tooltip over the shortened name in the table.
+  - Only strips an exact trailing match (name ending with " " + the
+    activity type), not "the type appears anywhere in the name" - a name
+    like "Urdorf Running Club Meetup" is correctly left alone rather than
+    losing meaningful context.
+  - Falls back to showing the name in full if stripping would leave
+    nothing - e.g. an activity whose name is only the type itself, with
+    no location prefix at all.
+  - Also added a general truncation safety net on the name column (with
+    the full name still reachable via the same hover tooltip), narrower
+    on mobile, so an unusually long name that doesn't match the
+    redundant-suffix pattern can't blow up the table width either.
+  - Verified against the exact reported examples ("Antibes Open Water
+    Swimming", "Z\u00fcrich Open Water Swimming") through the real running
+    app, across all three affected pages, plus the deliberately tricky
+    edge cases (type mentioned mid-name but not as a suffix, a name that
+    is only the type, case mismatches) directly against the actual model
+    code.
+
 ## 1.17.1
 - Fixed values wrapping awkwardly inside the 1.17.0 layout on narrower
   phones ("11.21 km" splitting off "km" onto its own line, "+730 m /
