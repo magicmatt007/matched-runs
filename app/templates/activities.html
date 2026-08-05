@@ -32,7 +32,7 @@
     {% for a in activities %}
         <tr>
             <td>{% if a.start_time %}<span data-utc-date="{{ a.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ a.start_time.strftime("%Y-%m-%d") }}</span>{% else %}-{% endif %}</td>
-            <td><a href="{{ base_path }}/activity/{{ a.id }}?{{ activity_context_query('activities', carry_params) }}">{{ a.name }}</a></td>
+            <td><a class="name-cell" title="{{ a.name }}" href="{{ base_path }}/activity/{{ a.id }}?{{ activity_context_query('activities', carry_params) }}">{{ a.display_name }}</a></td>
             <td>{{ a.activity_type }}</td>
             <td>{{ "%.2f"|format(a.distance_m / 1000) }} km</td>
             <td>{{ a.duration_s | hms }}</td>

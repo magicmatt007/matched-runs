@@ -91,6 +91,32 @@ class Activity(Base):
         return json.loads(self.time_profile_json) if self.time_profile_json else None
 
     @property
+    def display_name(self):
+        """Name for space-constrained table rows, with a redundant
+        trailing activity type stripped if present - e.g. "Antibes Open
+        Water Swimming" -> "Antibes" when the Type column right next to
+        it already says "Open Water Swimming" (this exact pattern is
+        produced by the "rename by city" feature: f"{city} {activity_type}").
+        The stored name itself is never touched - this is purely a
+        display transformation, and the activity detail page still shows
+        the full original name regardless.
+
+        Only strips an exact trailing " " + activity_type match (not
+        "contains the type anywhere"), so something like "Urdorf Running
+        Club Meetup" is correctly left alone. Falls back to the full name
+        if stripping would leave nothing meaningful - e.g. a name that IS
+        just the type, with no location prefix at all.
+        """
+        if not self.name or not self.activity_type:
+            return self.name
+        suffix = " " + self.activity_type
+        if self.name.endswith(suffix):
+            stripped = self.name[: -len(suffix)].strip()
+            if stripped:
+                return stripped
+        return self.name
+
+    @property
     def external_activity_url(self):
         """Link to this activity on the original service's website, if
         one can be determined - None otherwise.
