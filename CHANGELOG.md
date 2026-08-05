@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.17.0
+- Reworked the top of the activity detail page for mobile, based on a
+  real screenshot showing several space/layout issues:
+  - **Distance/Duration/Pace** are now a true 3-column grid instead of a
+    wrapping flex row - Pace was stretching to full width and dropping
+    to its own line on narrow phones, since it didn't fit alongside the
+    other two at their minimum width.
+  - **Elevation gain/loss** and **avg/max heart rate** are now each a
+    single combined card ("+120 m / -115 m", "152 / 178 bpm") instead of
+    two separate cards apiece - roughly halves the height of that
+    section. Falls back to showing just one value cleanly (no stray "/"
+    or "avg/max" label) when only one side of the pair is actually
+    present.
+  - **"No matches found yet for this route"** moved from an isolated
+    line between the two stat sections down to right by the map, where
+    the matching it's describing actually happens.
+  - **"Delete" moved out of the top action row**, away from "Next" -
+    those being adjacent meant a common navigation tap and an
+    irreversible destructive action sat right next to each other. Now
+    lives in its own row near the map, at the bottom of the page.
+  - Verified all of this against three real, distinct data shapes (full
+    stats with a matched route, single-sided elevation/HR with no match
+    yet, and no GPS track at all) through the actual running app, not
+    just one "happy path" render.
+
 ## 1.16.9
 - Simplified "via garmin ... View on Garmin Connect ↗" on the activity
   detail page down to just "via garmin ↗", with the source name itself
