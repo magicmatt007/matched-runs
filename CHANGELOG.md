@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.17.1
+- Fixed values wrapping awkwardly inside the 1.17.0 layout on narrower
+  phones ("11.21 km" splitting off "km" onto its own line, "+730 m /
+  -732 m" breaking mid-value) - a direct side effect of that change:
+  forcing three equal columns to stop Pace from stretching also made
+  each card narrower than the font size assumed.
+  - Reduced the Distance/Duration/Pace font size and card padding to
+    give the longest of the three (the pace value, with its "/km" suffix)
+    comfortable room at typical phone widths - sized with a deliberately
+    safe margin rather than a tight fit, since this is the second round
+    of adjustment on this exact layout and erring smaller is preferable
+    to still wrapping.
+  - Shortened the elevation card to show its unit once instead of twice
+    ("+730 / -732 m" instead of "+730 m / -732 m") - a few characters
+    shorter and just as clear.
+  - Verified both against the exact real numbers from the reported
+    screenshot (Leukerbad Hiking: 11.21 km, 730m/732m elevation, etc.)
+    through the real running app.
+  - One honest limitation: this environment can't render actual CSS to
+    confirm pixel-perfect text wrapping the way font-fit was verified
+    computationally for the SVG chart labels earlier - the sizing here is
+    a deliberately conservative estimate based on character count and
+    the page's real padding values, not a rendered screenshot. If it's
+    still wrapping (or now looks too small) on your phone specifically,
+    that's useful to know.
+
 ## 1.17.0
 - Reworked the top of the activity detail page for mobile, based on a
   real screenshot showing several space/layout issues:
