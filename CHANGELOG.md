@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.17.1
+- Fixed values wrapping awkwardly inside the 1.17.0 layout on narrower
+  phones ("11.21 km" splitting off "km" onto its own line, "+730 m /
+  -732 m" breaking mid-value) - a direct side effect of that change:
+  forcing three equal columns to stop Pace from stretching also made
+  each card narrower than the font size assumed.
+  - Reduced the Distance/Duration/Pace font size and card padding to
+    give the longest of the three (the pace value, with its "/km" suffix)
+    comfortable room at typical phone widths - sized with a deliberately
+    safe margin rather than a tight fit, since this is the second round
+    of adjustment on this exact layout and erring smaller is preferable
+    to still wrapping.
+  - Shortened the elevation card to show its unit once instead of twice
+    ("+730 / -732 m" instead of "+730 m / -732 m") - a few characters
+    shorter and just as clear.
+  - Verified both against the exact real numbers from the reported
+    screenshot (Leukerbad Hiking: 11.21 km, 730m/732m elevation, etc.)
+    through the real running app.
+  - One honest limitation: this environment can't render actual CSS to
+    confirm pixel-perfect text wrapping the way font-fit was verified
+    computationally for the SVG chart labels earlier - the sizing here is
+    a deliberately conservative estimate based on character count and
+    the page's real padding values, not a rendered screenshot. If it's
+    still wrapping (or now looks too small) on your phone specifically,
+    that's useful to know.
+
+## 1.17.0
+- Reworked the top of the activity detail page for mobile, based on a
+  real screenshot showing several space/layout issues:
+  - **Distance/Duration/Pace** are now a true 3-column grid instead of a
+    wrapping flex row - Pace was stretching to full width and dropping
+    to its own line on narrow phones, since it didn't fit alongside the
+    other two at their minimum width.
+  - **Elevation gain/loss** and **avg/max heart rate** are now each a
+    single combined card ("+120 m / -115 m", "152 / 178 bpm") instead of
+    two separate cards apiece - roughly halves the height of that
+    section. Falls back to showing just one value cleanly (no stray "/"
+    or "avg/max" label) when only one side of the pair is actually
+    present.
+  - **"No matches found yet for this route"** moved from an isolated
+    line between the two stat sections down to right by the map, where
+    the matching it's describing actually happens.
+  - **"Delete" moved out of the top action row**, away from "Next" -
+    those being adjacent meant a common navigation tap and an
+    irreversible destructive action sat right next to each other. Now
+    lives in its own row near the map, at the bottom of the page.
+  - Verified all of this against three real, distinct data shapes (full
+    stats with a matched route, single-sided elevation/HR with no match
+    yet, and no GPS track at all) through the actual running app, not
+    just one "happy path" render.
+
 ## 1.16.9
 - Simplified "via garmin ... View on Garmin Connect ↗" on the activity
   detail page down to just "via garmin ↗", with the source name itself
