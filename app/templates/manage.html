@@ -156,6 +156,11 @@
     <p class="muted">{{ total_activities }} activities imported.</p>
 </section>
 
+<section class="panel" id="rebuild-progress-panel" style="display:none;">
+    <h2>Recompute progress</h2>
+    <div id="rebuild-progress-content"></div>
+</section>
+
 <section class="panel" id="rename-progress-panel" style="display:none;">
     <h2>Rename progress</h2>
     <div id="rename-progress-content"></div>
@@ -476,6 +481,47 @@
         renderServerJob(initialJob);
         if (initialJob && initialJob.active) {
             pollTimer = setInterval(pollServerStatus, 1000);
+        }
+    })();
+
+    // --- Recompute matches progress ---
+    (function () {
+        var panel = document.getElementById('rebuild-progress-panel');
+        var content = document.getElementById('rebuild-progress-content');
+        var pollTimer = null;
+
+        function render(job) {
+            if (!job || (!job.active && job.phase !== 'done' && job.phase !== 'error')) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+
+            if (job.phase === 'matching') {
+                var frac = job.total > 0 ? job.done / job.total : 0;
+                content.innerHTML = job.total > 0
+                    ? '<p>Comparing activities: ' + job.done + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine('Getting started');
+            } else if (job.phase === 'done') {
+                content.innerHTML = '<p>Recompute finished.</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            } else if (job.phase === 'error') {
+                content.innerHTML = '<p style="color:#e6194b;">Recompute failed: ' + job.error + '</p>';
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            }
+        }
+
+        function poll() {
+            fetch('{{ base_path }}/manage/rebuild-status')
+                .then(function (r) { return r.json(); })
+                .then(render)
+                .catch(function () { /* transient network hiccup - next poll will retry */ });
+        }
+
+        var initialJob = {{ rebuild_job | tojson }};
+        render(initialJob);
+        if (initialJob && initialJob.active) {
+            pollTimer = setInterval(poll, 1000);
         }
     })();
 

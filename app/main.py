@@ -513,6 +513,7 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
         "garmin_sync_job": _current_garmin_sync_job,
         "db_import_job": _current_db_import_job,
         "rename_job": _current_rename_job,
+        "rebuild_job": _current_rebuild_job,
     })
 
 
@@ -1420,10 +1421,59 @@ def dedupe_route(request: Request, db: Session = Depends(get_db)):
     return local_redirect(request, f"/manage?imported=0&updated={removed}&skipped=0&duplicates=0&unsupported=0")
 
 
+_current_rebuild_job = {"active": False}
+
+
+def _run_rebuild_sync(job):
+    """Runs on a background thread - a full recompute is an O(n^2)
+    comparison over every activity, which can genuinely take a while for
+    a large collection (confirmed in practice: ~17.5s for ~2000
+    activities is typical, but could be much longer for more)."""
+    db = SessionLocal()
+    try:
+        job["phase"] = "matching"
+
+        def report_progress(done, total):
+            job["done"] = done
+            job["total"] = total
+
+        rebuild_groups(db, progress_callback=report_progress)
+        job["phase"] = "done"
+    except Exception as e:
+        logger.exception("Recompute matches job failed")
+        job["phase"] = "error"
+        job["error"] = str(e)
+    finally:
+        job["active"] = False
+        db.close()
+
+
 @app.post("/rebuild")
-def rebuild(request: Request, db: Session = Depends(get_db)):
-    rebuild_groups(db)
+async def rebuild(request: Request):
+    if _current_rebuild_job.get("active"):
+        prefix = ingress_prefix(request)
+        return HTMLResponse(
+            "<p>A recompute is already running. Check the Import &amp; "
+            "Sync page for its progress.</p>"
+            f"<p><a href='{prefix}/manage'>back</a></p>",
+            status_code=409,
+        )
+    _current_rebuild_job.clear()
+    _current_rebuild_job.update({
+        "active": True,
+        "phase": "matching",
+        "done": 0,
+        "total": 0,
+        "started_at": time.time(),
+        "error": None,
+    })
+    _spawn_background_task(asyncio.to_thread(_run_rebuild_sync, _current_rebuild_job))
     return local_redirect(request, "/manage")
+
+
+@app.get("/manage/rebuild-status")
+def rebuild_status():
+    return _current_rebuild_job
 
 
 # ---------------- Database export/import ----------------
