@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.17.3
+- "Recompute matches" now runs as a background job with visible progress,
+  instead of blocking the browser on a plain form submission with zero
+  feedback until it finished - the O(n^2) full comparison this triggers
+  can genuinely take a while for a large collection, exactly as
+  reported. Matches the same pattern already used for import, Garmin
+  sync, and the rename-by-city job: click the button, get redirected
+  immediately, and a progress panel appears showing how many comparisons
+  are done, an ETA, and a final "Recompute finished" message - reusing
+  rebuild_groups' own existing progress-callback support (already used
+  internally for the same purpose during a large import) rather than
+  needing anything new there.
+  - Verified through the real running app that the POST request itself
+    returns near-instantly rather than blocking on the actual recompute,
+    that the job reaches "done" with the correct comparison count for a
+    real dataset, and that triggering it again while one is already
+    running is correctly rejected rather than starting a second one
+    concurrently. Also tested the progress display's own logic directly
+    against every state (in progress with a known total, in progress
+    before the total is known yet, finished, and failed).
+
 ## 1.17.2
 - Activity tables (main activity list, a matched route's page, and the
   training log) no longer show a redundant activity type inside the name
