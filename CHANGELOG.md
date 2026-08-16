@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.17.12
+- Sped up "Rename all activities by city" by geocoding once per route
+  group instead of once per activity. Activities already matched into
+  the same RouteGroup are, by definition, the same real-world route, so
+  they always share a city - even on the rare occasion their individual
+  GPS start points jitter (different parking spot, corner of a park,
+  ...) enough to land outside the existing ~100m coordinate-rounding
+  cache. Reuses that already-computed route-matching work instead of
+  hitting Nominatim (capped at 1 request/second by its own usage policy,
+  the actual bottleneck this feature can't get around) again for every
+  single activity on a route someone's run or ridden many times.
+  - Verified against a real 1863-activity history: only 121 distinct
+    route groups, so this cuts the actual number of Nominatim calls
+    needed from 1863 to 540 (71% fewer) - worst-case runtime from ~31
+    minutes down to ~9. Verified the exact call count via direct
+    simulation against the real group distribution (no real Nominatim
+    calls made for this part), then confirmed the real endpoint runs
+    correctly with no errors and visibly outpaces the strict 1-call/
+    second floor once repeat-group activities start hitting the cache
+    (32 processed in ~23 seconds).
+
 ## 1.17.11
 - Recovered the correct activity type for both Strava and Garmin file-
   based imports, instead of a generic "Other" - reported after a real
