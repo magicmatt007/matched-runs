@@ -127,6 +127,12 @@ window.matchedRunsHideMapPoint = function () {
 
 
 {% if chart_points %}
+<div class="row" id="chart-xaxis-toggle" style="justify-content: flex-end; gap: 6px; margin: 10px 0 -2px;">
+    <span class="muted" style="font-size: 0.85rem;">X-axis:</span>
+    <button type="button" class="button" data-xaxis="distance" id="chart-xaxis-distance-btn">Distance</button>
+    <button type="button" class="button secondary" data-xaxis="time" id="chart-xaxis-time-btn">Time</button>
+</div>
+
 <div class="panel">
     <h3 style="margin-top:0;">Elevation (m)</h3>
     <div id="elevation-chart"></div>
@@ -170,11 +176,20 @@ window.matchedRunsHideMapPoint = function () {
         // was getting clipped before this had its own formatter/padding.
         var formatAxisTick = opts.formatAxisTick || formatValue;
 
+        // What goes along the x-axis - distance along the route by
+        // default, but callers pass elapsed_s/opts.xLabel etc. when the
+        // chart-xaxis-toggle above is set to "Time" instead.
+        var xKey = opts.xKey || 'dist_km';
+        var xAxisLabel = opts.xAxisLabel || 'Distance (km)';
+        var formatXTick = opts.formatXTick || function (v) { return v.toFixed(1); };
+        var formatXValue = opts.formatXValue || function (v) { return v.toFixed(2) + ' km'; };
+
         var container = document.getElementById(containerId);
         if (!container) return;
 
         var validPoints = (chartPoints || []).filter(function (p) {
-            return p[valueKey] !== null && p[valueKey] !== undefined;
+            return p[valueKey] !== null && p[valueKey] !== undefined &&
+                   p[xKey] !== null && p[xKey] !== undefined;
         });
         if (validPoints.length < 2) {
             var article = /^[aeiou]/i.test(label) ? 'an' : 'a';
@@ -196,14 +211,14 @@ window.matchedRunsHideMapPoint = function () {
         minV -= vpad;
         maxV += vpad;
 
-        var minDist = validPoints[0].dist_km;
-        var maxDist = validPoints[validPoints.length - 1].dist_km;
-        if (maxDist <= minDist) maxDist = minDist + 0.001;
+        var minX = Math.min.apply(null, validPoints.map(function (p) { return p[xKey]; }));
+        var maxX = Math.max.apply(null, validPoints.map(function (p) { return p[xKey]; }));
+        if (maxX <= minX) maxX = minX + 0.001;
 
         var avg = values.reduce(function (a, b) { return a + b; }, 0) / values.length;
 
-        function xFor(distKm) {
-            return padding.left + ((distKm - minDist) / (maxDist - minDist)) * plotW;
+        function xFor(xVal) {
+            return padding.left + ((xVal - minX) / (maxX - minX)) * plotW;
         }
         function yFor(v) {
             var normalized = (v - minV) / (maxV - minV);
@@ -227,14 +242,15 @@ window.matchedRunsHideMapPoint = function () {
             svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="12" fill="#8b8f9a">' + formatAxisTick(val) + '</text>';
         }
 
-        // x-axis distance labels
+        // x-axis labels (distance or elapsed time, depending on the
+        // chart-xaxis-toggle selection)
         var xTickCount = Math.min(6, validPoints.length - 1) || 1;
         for (var xt = 0; xt <= xTickCount; xt++) {
-            var d = minDist + (xt / xTickCount) * (maxDist - minDist);
+            var d = minX + (xt / xTickCount) * (maxX - minX);
             var xx = xFor(d);
-            svg += '<text x="' + xx + '" y="' + (height - padding.bottom + 16) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">' + d.toFixed(1) + '</text>';
+            svg += '<text x="' + xx + '" y="' + (height - padding.bottom + 16) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">' + formatXTick(d) + '</text>';
         }
-        svg += '<text x="' + (padding.left + plotW / 2) + '" y="' + (height - 4) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">Distance (km)</text>';
+        svg += '<text x="' + (padding.left + plotW / 2) + '" y="' + (height - 4) + '" text-anchor="middle" font-size="11" fill="#8b8f9a">' + xAxisLabel + '</text>';
 
         // average reference line
         var avgY = yFor(avg);
@@ -243,7 +259,7 @@ window.matchedRunsHideMapPoint = function () {
         svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">avg ' + formatValue(avg) + '</text>';
 
         // main line
-        var linePoints = validPoints.map(function (p) { return xFor(p.dist_km) + ',' + yFor(p[valueKey]); }).join(' ');
+        var linePoints = validPoints.map(function (p) { return xFor(p[xKey]) + ',' + yFor(p[valueKey]); }).join(' ');
         svg += '<polyline points="' + linePoints + '" fill="none" stroke="' + color + '" stroke-width="2" />';
 
         // hover indicator (hidden until moused over)
@@ -264,11 +280,11 @@ window.matchedRunsHideMapPoint = function () {
         var tooltip = document.getElementById(containerId + '-tooltip');
         var svgEl = document.getElementById(containerId + '-svg');
 
-        function nearestPoint(hoveredDist) {
+        function nearestPoint(hoveredX) {
             var nearest = validPoints[0];
-            var bestDiff = Math.abs(nearest.dist_km - hoveredDist);
+            var bestDiff = Math.abs(nearest[xKey] - hoveredX);
             for (var i = 1; i < validPoints.length; i++) {
-                var diff = Math.abs(validPoints[i].dist_km - hoveredDist);
+                var diff = Math.abs(validPoints[i][xKey] - hoveredX);
                 if (diff < bestDiff) {
                     bestDiff = diff;
                     nearest = validPoints[i];
@@ -282,10 +298,10 @@ window.matchedRunsHideMapPoint = function () {
             if (rect.width === 0) return;
             var scale = width / rect.width; // viewBox units per CSS pixel
             var mouseX = (clientX - rect.left) * scale;
-            var hoveredDist = minDist + ((mouseX - padding.left) / plotW) * (maxDist - minDist);
+            var hoveredX = minX + ((mouseX - padding.left) / plotW) * (maxX - minX);
 
-            var nearest = nearestPoint(hoveredDist);
-            var px = xFor(nearest.dist_km);
+            var nearest = nearestPoint(hoveredX);
+            var px = xFor(nearest[xKey]);
             var py = yFor(nearest[valueKey]);
 
             hoverLine.setAttribute('x1', px);
@@ -295,7 +311,7 @@ window.matchedRunsHideMapPoint = function () {
             hoverDot.setAttribute('cy', py);
             hoverDot.setAttribute('opacity', 1);
 
-            tooltip.textContent = nearest.dist_km.toFixed(2) + ' km: ' + formatValue(nearest[valueKey]);
+            tooltip.textContent = formatXValue(nearest[xKey]) + ': ' + formatValue(nearest[valueKey]);
 
             if (window.matchedRunsHighlightMapPoint) {
                 window.matchedRunsHighlightMapPoint(nearest.lat, nearest.lon);
@@ -330,17 +346,17 @@ window.matchedRunsHideMapPoint = function () {
         return m + ':' + String(s).padStart(2, '0');
     }
 
-    renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation', {
-        // No unit on the axis itself - the chart title already says
-        // "Elevation (m)", and the axis is the tightest space in the chart.
-        formatAxisTick: function (v) { return Math.round(v); }
-    });
-    renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate', {
-        // Same reasoning - "158 bpm" doesn't fit the axis's reserved
-        // space the way "158" does, which is what was actually causing
-        // the labels to be clipped (visible in the reported screenshot).
-        formatAxisTick: function (v) { return Math.round(v); }
-    });
+    function formatElapsed(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return '-';
+        var total = Math.round(seconds);
+        var h = Math.floor(total / 3600);
+        var m = Math.floor((total % 3600) / 60);
+        var s = total % 60;
+        if (h > 0) {
+            return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+        return m + ':' + String(s).padStart(2, '0');
+    }
 
     var isCycling = {{ 'true' if is_cycling else 'false' }};
     if (isCycling) {
@@ -354,22 +370,107 @@ window.matchedRunsHideMapPoint = function () {
         (chartPoints || []).forEach(function (p) {
             p.speed_kmh = (p.pace_s_per_km && p.pace_s_per_km > 0) ? 3600 / p.pace_s_per_km : null;
         });
-        renderProfileChart('pace-chart', 'speed_kmh', '#4363d8', ' km/h', 'Speed', {
-            formatValue: function (v) { return v.toFixed(1) + ' km/h'; },
-            formatAxisTick: function (v) { return v.toFixed(0); }
+    }
+
+    // Distance is the default x-axis, but every chart point also carries
+    // elapsed_s (real per-point timing, or an even-pace estimate - see
+    // _build_chart_points) - so the toggle below can re-render all three
+    // charts against elapsed time instead, without any extra server call.
+    var hasTimeData = (chartPoints || []).some(function (p) {
+        return p.elapsed_s !== null && p.elapsed_s !== undefined;
+    });
+
+    function xAxisOpts(mode) {
+        if (mode === 'time') {
+            return {
+                xKey: 'elapsed_s',
+                xAxisLabel: 'Time',
+                formatXTick: formatElapsed,
+                formatXValue: formatElapsed
+            };
+        }
+        return {
+            xKey: 'dist_km',
+            xAxisLabel: 'Distance (km)',
+            formatXTick: function (v) { return v.toFixed(1); },
+            formatXValue: function (v) { return v.toFixed(2) + ' km'; }
+        };
+    }
+
+    function renderCharts(xAxisMode) {
+        var xOpts = xAxisOpts(xAxisMode);
+
+        renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation', Object.assign({
+            // No unit on the axis itself - the chart title already says
+            // "Elevation (m)", and the axis is the tightest space in the chart.
+            formatAxisTick: function (v) { return Math.round(v); }
+        }, xOpts));
+        renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate', Object.assign({
+            // Same reasoning - "158 bpm" doesn't fit the axis's reserved
+            // space the way "158" does, which is what was actually causing
+            // the labels to be clipped (visible in the reported screenshot).
+            formatAxisTick: function (v) { return Math.round(v); }
+        }, xOpts));
+
+        if (isCycling) {
+            renderProfileChart('pace-chart', 'speed_kmh', '#4363d8', ' km/h', 'Speed', Object.assign({
+                formatValue: function (v) { return v.toFixed(1) + ' km/h'; },
+                formatAxisTick: function (v) { return v.toFixed(0); }
+            }, xOpts));
+        } else {
+            renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', Object.assign({
+                invertY: true,
+                formatValue: function (v) { return formatPace(v) + ' /km'; },
+                // Shorter, no unit - the chart title already says "Pace (min/km)",
+                // and the axis itself is the tightest space in the whole chart.
+                formatAxisTick: formatPace,
+                // "5:30"-style labels need more room than elevation/heart rate's
+                // plain numbers - this is what was actually getting clipped.
+                leftPadding: 52
+            }, xOpts));
+        }
+    }
+
+    // The toggle applies to all three charts at once and is remembered
+    // across activities (localStorage), since a runner comparing splits
+    // tends to want the same x-axis every time they land on this page.
+    var XAXIS_STORAGE_KEY = 'matchedRunsChartXAxis';
+    var distanceBtn = document.getElementById('chart-xaxis-distance-btn');
+    var timeBtn = document.getElementById('chart-xaxis-time-btn');
+    var toggleRow = document.getElementById('chart-xaxis-toggle');
+
+    var storedMode = null;
+    try { storedMode = window.localStorage.getItem(XAXIS_STORAGE_KEY); } catch (e) { /* ignore (e.g. private browsing) */ }
+    var xAxisMode = (hasTimeData && storedMode === 'time') ? 'time' : 'distance';
+
+    function setActiveButton(mode) {
+        if (distanceBtn) distanceBtn.classList.toggle('secondary', mode !== 'distance');
+        if (timeBtn) timeBtn.classList.toggle('secondary', mode !== 'time');
+    }
+
+    if (!hasTimeData) {
+        // No per-point or estimated timing at all for this activity -
+        // nothing a "Time" x-axis could show, so don't offer it.
+        if (toggleRow) toggleRow.style.display = 'none';
+    } else if (distanceBtn && timeBtn) {
+        distanceBtn.addEventListener('click', function () {
+            if (xAxisMode === 'distance') return;
+            xAxisMode = 'distance';
+            setActiveButton(xAxisMode);
+            try { window.localStorage.setItem(XAXIS_STORAGE_KEY, xAxisMode); } catch (e) { /* ignore */ }
+            renderCharts(xAxisMode);
         });
-    } else {
-        renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', {
-            invertY: true,
-            formatValue: function (v) { return formatPace(v) + ' /km'; },
-            // Shorter, no unit - the chart title already says "Pace (min/km)",
-            // and the axis itself is the tightest space in the whole chart.
-            formatAxisTick: formatPace,
-            // "5:30"-style labels need more room than elevation/heart rate's
-            // plain numbers - this is what was actually getting clipped.
-            leftPadding: 52
+        timeBtn.addEventListener('click', function () {
+            if (xAxisMode === 'time') return;
+            xAxisMode = 'time';
+            setActiveButton(xAxisMode);
+            try { window.localStorage.setItem(XAXIS_STORAGE_KEY, xAxisMode); } catch (e) { /* ignore */ }
+            renderCharts(xAxisMode);
         });
     }
+
+    setActiveButton(xAxisMode);
+    renderCharts(xAxisMode);
 })();
 </script>
 
