@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.17.10
+- Fixed cross-source duplicate detection (both at import time and the
+  "Merge duplicate activities" button) never catching the same real
+  activity imported from both a Garmin export and a Strava export -
+  reported after a Strava import created ~1750 duplicate rows that
+  clicking "Merge duplicate activities" didn't remove.
+  - Root cause: `source` reflects file *format* for a file-based import
+    (fit/gpx/tcx), not which *service* delivered it - both a Garmin
+    export and a Strava export of the exact same activity commonly land
+    on the same source string (e.g. both "tcx"), and both duplicate-
+    detection paths explicitly skipped comparing same-source activities
+    - confirmed directly: a real Garmin-exported and Strava-exported TCX
+      of the same hike, identical start time and distance, sat as two
+      permanently unmerged rows because of exactly this.
+  - Fix: stopped excluding same-source pairs from comparison in both
+    places - real duplicates are still identified correctly by matching
+    route geometry and start time, same as always, regardless of
+    whether the two sides happen to share a source string.
+  - Verified against the real duplicated database: clicking "Merge
+    duplicate activities" now removes 1640 duplicate rows (3694 -> 2054
+    - the 110 net gain over the pre-Strava-import count of 1944 being
+      genuinely new history Strava had that Garmin's export didn't),
+    confirmed a specific known-duplicate pair (identical start time and
+    distance to the millimeter) correctly merged down to one row, and
+    confirmed the only activities *not* caught (76 pairs) are pool
+    swims/other GPS-less activities - a separate, pre-existing,
+    intentional limitation (there's no route to match two empty GPS
+    tracks against each other), not a regression from this fix.
+
 ## 1.17.9
 - Cycling activities now show speed (km/h) instead of pace (min/km)
   everywhere pace was previously shown unconditionally: the main activity

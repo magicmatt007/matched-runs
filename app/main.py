@@ -590,7 +590,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     # sync both bringing in the same hike). Detected by close start time +
     # matching route geometry, since sources sometimes disagree slightly on
     # exact distance/duration.
-    dup = find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source=source)
+    dup = find_cross_source_duplicate(db, points, distance_m, start_time)
     if dup is not None:
         if SOURCE_PRIORITY.get(source, 0) > SOURCE_PRIORITY.get(dup.source, 0):
             # New source is richer (e.g. a live Garmin/Strava sync arriving
