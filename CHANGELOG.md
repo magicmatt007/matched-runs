@@ -1,5 +1,73 @@
 # Changelog
 
+## 1.17.11
+- Recovered the correct activity type for both Strava and Garmin file-
+  based imports, instead of a generic "Other" - reported after a real
+  activity ("Morning Skate", an inline skate) showed as "Other" despite
+  being correctly classified on Strava.
+  - Root cause: a raw TCX file's own `Sport` attribute can only ever be
+    "Running", "Biking", or "Other" - that's the entire enum the TCX v2
+    schema allows, regardless of source or which app originally recorded
+    it. Confirmed directly against the actual reported activity: both
+    the Strava-exported and Garmin-exported copies of the identical TCX
+    file say `Sport="Other"`, even though the Garmin filename itself
+    happened to say "Skating" (leaked from the original Polar device's
+    naming, never read by this app's parser).
+  - Fix: both `activities.csv` (Strava) and `summarizedActivities.json`
+    (Garmin) - the same files this app already uses to recover real
+    names and links - also carry the real classification, now used to
+    backfill activity_type too, with the same "only applies when
+    present" and retroactive-backfill-on-reimport behavior as the
+    name/link recovery. Strava's vocabulary ("Ride", "Alpine Ski")
+    doesn't match this app's own (Garmin-derived) naming, so it goes
+    through an explicit mapping table rather than being used as-is, to
+    avoid fragmenting the type list or breaking cycling detection.
+    Garmin's own vocabulary already matches (same snake_case convention
+    already used for a .fit file's own sport field), so it only needed
+    its internal `_v2`/`_ws` tags stripped.
+  - Fixed a bug introduced by this same change before it was ever
+    released: the retroactive backfill for already-imported activities
+    wrote the recovered type straight to the database, bypassing the
+    same version-suffix stripping every other code path already goes
+    through - so a Garmin type like `kayaking_v2` reappeared as
+    "Kayaking V2" instead of "Kayaking". Caught via manual testing before
+    shipping, not a real-world report.
+  - Verified against the actual reported activity and its exact
+    Strava/Garmin files: confirmed the TCX limitation directly, backfilled
+    the correct type ("Inline Skating") through each recovery path
+    independently by resetting and re-testing one at a time, and verified
+    the version-suffix fix at the unit level for every Garmin type
+    string containing a version/tag suffix seen in the real export.
+
+## 1.17.10
+- Fixed cross-source duplicate detection (both at import time and the
+  "Merge duplicate activities" button) never catching the same real
+  activity imported from both a Garmin export and a Strava export -
+  reported after a Strava import created ~1750 duplicate rows that
+  clicking "Merge duplicate activities" didn't remove.
+  - Root cause: `source` reflects file *format* for a file-based import
+    (fit/gpx/tcx), not which *service* delivered it - both a Garmin
+    export and a Strava export of the exact same activity commonly land
+    on the same source string (e.g. both "tcx"), and both duplicate-
+    detection paths explicitly skipped comparing same-source activities
+    - confirmed directly: a real Garmin-exported and Strava-exported TCX
+      of the same hike, identical start time and distance, sat as two
+      permanently unmerged rows because of exactly this.
+  - Fix: stopped excluding same-source pairs from comparison in both
+    places - real duplicates are still identified correctly by matching
+    route geometry and start time, same as always, regardless of
+    whether the two sides happen to share a source string.
+  - Verified against the real duplicated database: clicking "Merge
+    duplicate activities" now removes 1640 duplicate rows (3694 -> 2054
+    - the 110 net gain over the pre-Strava-import count of 1944 being
+      genuinely new history Strava had that Garmin's export didn't),
+    confirmed a specific known-duplicate pair (identical start time and
+    distance to the millimeter) correctly merged down to one row, and
+    confirmed the only activities *not* caught (76 pairs) are pool
+    swims/other GPS-less activities - a separate, pre-existing,
+    intentional limitation (there's no route to match two empty GPS
+    tracks against each other), not a regression from this fix.
+
 ## 1.17.9
 - Cycling activities now show speed (km/h) instead of pace (min/km)
   everywhere pace was previously shown unconditionally: the main activity

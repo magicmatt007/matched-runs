@@ -324,6 +324,21 @@ def _run_import_sync(files_data, name_overrides, garmin_index, job):
                     if garmin_index else None
                 )
                 final_name = csv_override.get("title") or (garmin_match and garmin_match["name"]) or parsed["name"]
+                # Same idea for activity type - a raw TCX file's own Sport
+                # attribute can only ever be Running/Biking/Other (the
+                # entire enum TCX v2 allows), so both Strava's own richer
+                # classification (from the same activities.csv the title
+                # above comes from - see strava_csv.py's STRAVA_TYPE_MAP
+                # for why an unmapped raw Strava string is never used as-
+                # is) and Garmin's own (from the same summarized-
+                # activities match the name/link above use - see
+                # garmin_summarized.py) are preferred over whatever the
+                # raw file itself says, when available.
+                final_activity_type = (
+                    csv_override.get("activity_type")
+                    or (garmin_match and garmin_match.get("activity_type"))
+                    or parsed.get("activity_type")
+                )
 
                 # Basename only, not the full uploaded (or, for a zip
                 # member, in-zip) path - a folder-based bulk upload and a
@@ -342,7 +357,7 @@ def _run_import_sync(files_data, name_overrides, garmin_index, job):
                     db, source=source, external_id=external_id,
                     name=final_name, points=parsed["points"],
                     distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
-                    start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
+                    start_time=parsed["start_time"], activity_type=final_activity_type,
                     elevation_gain_m=parsed.get("elevation_gain_m"),
                     elevation_loss_m=parsed.get("elevation_loss_m"),
                     avg_heart_rate=parsed.get("avg_heart_rate"),
@@ -403,6 +418,12 @@ def _run_import_sync(files_data, name_overrides, garmin_index, job):
                 if activity_id and act.strava_activity_id != activity_id:
                     act.strava_activity_id = activity_id
                     changed_here = True
+                better_type = override.get("activity_type")
+                if better_type:
+                    better_type = normalize_activity_type(better_type)
+                if better_type and act.activity_type != better_type:
+                    act.activity_type = better_type
+                    changed_here = True
                 if changed_here:
                     updated += 1
         # Same idea for a Garmin export's summarized-activities JSON,
@@ -426,6 +447,12 @@ def _run_import_sync(files_data, name_overrides, garmin_index, job):
                     changed_here = True
                 if act.garmin_activity_id != match["activity_id"]:
                     act.garmin_activity_id = match["activity_id"]
+                    changed_here = True
+                better_type = match.get("activity_type")
+                if better_type:
+                    better_type = normalize_activity_type(better_type)
+                if better_type and act.activity_type != better_type:
+                    act.activity_type = better_type
                     changed_here = True
                 if changed_here:
                     updated += 1
@@ -590,7 +617,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
     # sync both bringing in the same hike). Detected by close start time +
     # matching route geometry, since sources sometimes disagree slightly on
     # exact distance/duration.
-    dup = find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source=source)
+    dup = find_cross_source_duplicate(db, points, distance_m, start_time)
     if dup is not None:
         if SOURCE_PRIORITY.get(source, 0) > SOURCE_PRIORITY.get(dup.source, 0):
             # New source is richer (e.g. a live Garmin/Strava sync arriving

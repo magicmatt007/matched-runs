@@ -113,19 +113,31 @@ class UnionFind:
             self.parent[ra] = rb
 
 
-def find_cross_source_duplicate(db, points, distance_m, start_time, exclude_source):
-    """Look for an already-imported activity from a DIFFERENT source that's
-    almost certainly the same real-world activity: start time close together
-    and matching route geometry. Returns the existing Activity row, or None.
+def find_cross_source_duplicate(db, points, distance_m, start_time):
+    """Look for an already-imported activity that's almost certainly the
+    same real-world activity: start time close together and matching
+    route geometry. Returns the existing Activity row, or None.
     Activities with no GPS track (e.g. indoor swims) are never compared
     this way - there's no route to match, and it's not safe to compare two
-    empty tracks (see tracks_match/_mean_deviation)."""
+    empty tracks (see tracks_match/_mean_deviation).
+
+    Deliberately does NOT exclude same-`source` activities (an earlier
+    version did, hence this function's name - kept as-is, "cross-source"
+    is still the common case this matters for). `source` is set by file
+    FORMAT for a file-based import (fit/gpx/tcx), not by which SERVICE
+    delivered it - a Garmin export and a Strava export of the exact same
+    real activity both land on source="tcx" (or fit/gpx) if both happen
+    to be that format, which used to make this function - and the "Merge
+    duplicate activities" button, which shares this same source != source
+    requirement - silently unable to ever catch that very common case.
+    Confirmed directly: a real Garmin-exported and Strava-exported TCX of
+    the same hike, identical start_time and distance to the millimeter,
+    sat as two permanently unmerged rows because both were source="tcx"."""
     if start_time is None or not points:
         return None
 
     candidates = (
         db.query(Activity)
-        .filter(Activity.source != exclude_source)
         .filter(Activity.start_time >= start_time - DUPLICATE_TIME_WINDOW)
         .filter(Activity.start_time <= start_time + DUPLICATE_TIME_WINDOW)
         .all()
@@ -147,9 +159,19 @@ def find_cross_source_duplicate(db, points, distance_m, start_time, exclude_sour
 
 def merge_duplicate_activities(db):
     """One-off retroactive cleanup: scan everything already imported for
-    cross-source duplicates (same route, close start time) and merge them
-    down to a single row, keeping whichever source ranks higher in
-    SOURCE_PRIORITY. Returns the number of duplicate rows removed."""
+    duplicates (same route, close start time) and merge them down to a
+    single row, keeping whichever source ranks higher in SOURCE_PRIORITY
+    (ties - e.g. two file-based imports - keep whichever comes first by
+    start_time, arbitrary but deterministic). Returns the number of
+    duplicate rows removed.
+
+    Deliberately does NOT skip a same-`source` pair (an earlier version
+    did) - see find_cross_source_duplicate's docstring for exactly why
+    that was wrong: `source` reflects file FORMAT for a file-based
+    import, not which SERVICE it came from, so a Garmin export and a
+    Strava export of the same real activity commonly share a source
+    string and were - confirmed directly - never merged by this
+    function as a result, even after clicking this exact button."""
     activities = db.query(Activity).order_by(Activity.start_time).all()
     to_delete = set()
 
@@ -160,8 +182,6 @@ def merge_duplicate_activities(db):
         for j in range(i + 1, len(activities)):
             b = activities[j]
             if b.id in to_delete or b.start_time is None or not b.resampled_points:
-                continue
-            if a.source == b.source:
                 continue
             if b.start_time - a.start_time > DUPLICATE_TIME_WINDOW:
                 break  # activities are ordered by start_time, nothing further can be within the window
