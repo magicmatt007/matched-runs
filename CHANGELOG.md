@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.17.4
+- The activity detail page's Elevation, Pace/Speed, and Heart Rate charts
+  can now switch their x-axis between distance and elapsed time via a
+  "X-axis: Distance / Time" toggle above them - useful for spotting where
+  in the run/ride something happened by clock time rather than by
+  position along the route. All three charts switch together, using the
+  same elapsed_s each chart point already carries (real per-point timing,
+  or the existing even-pace estimate for older imports) - no server
+  changes needed. The choice is remembered (localStorage) across
+  activities, and the "Time" option is hidden entirely for the rare
+  activity with no timing data at all to plot.
+  - Verified against the real running app: toggling re-renders all three
+    charts with correctly formatted time-axis ticks/tooltips (h:mm:ss),
+    hover/map-highlight still works, and the choice persists across a
+    page reload.
+
 ## 1.17.3
 - "Recompute matches" now runs as a background job with visible progress,
   instead of blocking the browser on a plain form submission with zero
