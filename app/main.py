@@ -3,6 +3,8 @@ from urllib.parse import urlencode
 import time
 import os
 import gzip
+import io
+import zipfile
 import logging
 import asyncio
 import sqlite3
@@ -25,8 +27,9 @@ from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
 from app.matcher import resample_track, rebuild_groups, incremental_rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY, haversine
 from app.polyline_util import decode_polyline
-from app.type_normalize import normalize_activity_type, merge_legacy_type
+from app.type_normalize import normalize_activity_type
 from app.strava_csv import parse_strava_activities_csv
+from app.garmin_summarized import parse_summarized_activities as parse_garmin_summarized_activities, build_start_time_index, match_by_start_time
 from app import strava_client
 from app import garmin_client
 
@@ -70,13 +73,19 @@ def _spawn_background_task(coro):
     return task
 
 
-def _parse_one_file(filename: str, content: bytes):
-    """Runs in a worker process (see MAX_PARSE_WORKERS/_run_import_sync
-    below) - pure parsing, no DB access at all, since SQLite doesn't want
-    concurrent writers and this needs to stay safely parallelizable.
-    Defined at module level (not nested) so it can be pickled and sent to
-    worker processes. Returns a dict describing what happened, never
-    raises - any parse failure is captured and reported back instead."""
+_SUPPORTED_PARSERS = {"fit": parse_fit_bytes, "gpx": parse_gpx_bytes, "tcx": parse_tcx_bytes}
+
+
+def _parse_single_entry(filename: str, content: bytes) -> dict:
+    """Parses one raw activity file's bytes - a bare upload, or a file
+    already pulled out of a .zip by _expand_zip_entries below, before this
+    even runs. Runs in a worker process (see MAX_PARSE_WORKERS/
+    _run_import_sync below) - pure parsing, no DB access at all, since
+    SQLite doesn't want concurrent writers and this needs to stay safely
+    parallelizable. Defined at module level (not nested) so it can be
+    pickled and sent to worker processes. Returns a single result dict,
+    never raises - any parse failure is captured and reported back
+    instead."""
     lower_name = filename.lower()
 
     if lower_name.endswith(".gz"):
@@ -87,14 +96,8 @@ def _parse_one_file(filename: str, content: bytes):
         lower_name = lower_name[:-3]
 
     ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else "(none)"
-
-    if lower_name.endswith(".fit"):
-        source, parse_fn = "fit", parse_fit_bytes
-    elif lower_name.endswith(".gpx"):
-        source, parse_fn = "gpx", parse_gpx_bytes
-    elif lower_name.endswith(".tcx"):
-        source, parse_fn = "tcx", parse_tcx_bytes
-    else:
+    parse_fn = _SUPPORTED_PARSERS.get(ext)
+    if parse_fn is None:
         return {"filename": filename, "status": "unsupported", "ext": ext}
 
     try:
@@ -102,7 +105,89 @@ def _parse_one_file(filename: str, content: bytes):
     except Exception as e:
         return {"filename": filename, "status": "error", "error": str(e), "ext": ext}
 
-    return {"filename": filename, "status": "ok", "source": source, "parsed": parsed, "ext": ext}
+    # A syntactically valid .fit file with genuinely nothing in it - no
+    # GPS points, no duration, no distance - isn't an activity at all.
+    # Confirmed directly against a real Garmin account export: alongside
+    # real workouts, its DI-Connect-Uploaded-Files zips also carry every
+    # other raw .fit Garmin's servers ever received for this account,
+    # including plain monitoring/wellness snapshots (heart rate, steps,
+    # etc.) that were NEVER a recorded activity - tens of thousands of
+    # them, each parsing "successfully" to a completely empty result.
+    # Deliberately narrower than "no GPS": an indoor treadmill run with
+    # real duration/distance but no GPS track is still a genuine activity
+    # (see fit_parser.py) and must NOT be caught by this - only something
+    # with literally nothing usable at all should be.
+    if not parsed.get("points") and not parsed.get("duration_s") and not parsed.get("distance_m"):
+        return {"filename": filename, "status": "empty", "ext": ext}
+
+    return {"filename": filename, "status": "ok", "source": ext, "parsed": parsed, "ext": ext}
+
+
+def _expand_zip_entries(filename: str, content: bytes):
+    """Recursively flattens a .zip upload into individual (name, content)
+    files ready for the parse worker pool - a plain (non-zip) upload
+    trivially "expands" to just itself. Runs in the coordinator thread,
+    BEFORE any worker process is spawned - not inside one - specifically
+    so that both the import's progress bar AND the parse pool's per-worker
+    load balancing are based on the real per-activity file count, not the
+    handful of top-level uploaded items.
+
+    This is what makes Garmin's full "Export Your Data" account archive
+    work at all: unlike the single-activity "Export to GPX" download, its
+    DI-Connect-Uploaded-Files folder wraps each raw uploaded file - and,
+    confirmed directly against a real export, sometimes tens of thousands
+    of them, several deep per zip - in a handful of individual .zip files
+    instead of bare .fit/.gpx/.tcx. Expanding those zips as a single
+    "parse this whole upload" unit (the previous approach) meant the
+    progress bar only ticked once per zip, so the last couple of huge
+    (10,000+ entry) zips left it sitting still for most of the import -
+    confirmed directly against a real export - while whichever worker
+    drew the short straw ground through thousands of files alone with the
+    rest of the pool already idle. Expanding up front instead means every
+    individual file is its own unit of work: an accurate, steadily-moving
+    total, and all workers sharing a big zip's contents instead of one
+    worker serializing through it.
+
+    Returns (files, resolved): `files` is a list of (name, content) pairs
+    still needing a worker to parse; `resolved` is a list of already-final
+    result dicts for something that will never need one - an empty/
+    unreadable zip, or a zip member that failed to read - so the caller
+    can count those immediately instead of pretending they need parsing."""
+    if not filename.lower().endswith(".zip"):
+        return [(filename, content)], []
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except Exception as e:
+        return [], [{"filename": filename, "status": "error", "error": f"unzip failed: {e}", "ext": "zip"}]
+
+    with zf:
+        # Skip directory entries and macOS's junk metadata (__MACOSX/ and
+        # AppleDouble ._* files) - neither is an activity file, and both
+        # are common in zips that went through a Mac at some point.
+        members = [
+            info for info in zf.infolist()
+            if not info.is_dir()
+            and "__MACOSX" not in info.filename
+            and not info.filename.rsplit("/", 1)[-1].startswith(".")
+        ]
+        if not members:
+            return [], [{"filename": filename, "status": "unsupported", "ext": "zip"}]
+
+        files, resolved = [], []
+        for info in members:
+            inner_name = f"{filename}/{info.filename}"
+            try:
+                inner_content = zf.read(info)
+            except Exception as e:
+                resolved.append({"filename": inner_name, "status": "error", "error": str(e), "ext": "(zip member)"})
+                continue
+            # Recurse - handles a zip-of-zips the same way, flattening all
+            # the way down to real activity files.
+            sub_files, sub_resolved = _expand_zip_entries(inner_name, inner_content)
+            files.extend(sub_files)
+            resolved.extend(sub_resolved)
+        return files, resolved
 
 
 # Parsing is CPU-bound and each file is completely independent of every
@@ -115,18 +200,55 @@ def _parse_one_file(filename: str, content: bytes):
 MAX_PARSE_WORKERS = min(os.cpu_count() or 1, 8)
 
 
-def _run_import_sync(files_data, name_overrides, job):
+def _run_import_sync(files_data, name_overrides, garmin_index, job):
     """The actual (slow, synchronous) import work: parse every file (in
     parallel across worker processes), save each activity (sequentially,
     since SQLite doesn't want concurrent writers - this part turned out to
     be a small fraction of the total time anyway), then re-run route
-    matching. Runs on a worker thread via asyncio.to_thread."""
+    matching. Runs on a worker thread via asyncio.to_thread.
+
+    garmin_index (see garmin_summarized.py), if given, backfills the real
+    name and a working "View on Garmin" link onto .fit/.gpx/.tcx-sourced
+    activities - matched by start time, since a Garmin export gives no
+    more direct way to connect a raw uploaded file to Garmin's own
+    knowledge of that same activity."""
     db = SessionLocal()
     t_start = time.time()
     try:
-        added, updated, unchanged, skipped, unsupported_ext = 0, 0, 0, 0, 0
+        added, updated, unchanged, skipped, unsupported_ext, empty_count = 0, 0, 0, 0, 0, 0
         seen_extensions = set()
         added_activities = []
+
+        # Expand any .zip uploads into their individual files up front, in
+        # this thread, before any worker starts - see _expand_zip_entries'
+        # docstring for why (accurate progress + better load balancing on
+        # a real Garmin export's handful of huge zips). job["total"] gets
+        # corrected here too - the /upload route set it to just the number
+        # of uploaded items, for instant feedback before expansion (which
+        # itself takes a little while for a large export) was even done.
+        t_expand_start = time.time()
+        expanded_files = []
+        pre_resolved = []  # already-final results that need no parsing at all
+        for filename, content in files_data:
+            files, resolved = _expand_zip_entries(filename, content)
+            expanded_files.extend(files)
+            pre_resolved.extend(resolved)
+        job["total"] = len(expanded_files) + len(pre_resolved)
+        t_expand_done = time.time()
+        if len(files_data) != job["total"]:
+            logger.info(
+                "[import] expanded %d uploaded item(s) into %d individual file(s) in %.1fs",
+                len(files_data), job["total"], t_expand_done - t_expand_start,
+            )
+
+        for result in pre_resolved:
+            seen_extensions.add(result.get("ext", "(none)"))
+            if result["status"] == "error":
+                logger.warning("Failed to parse %s: %s", result.get("filename"), result.get("error"))
+            elif result["status"] == "unsupported":
+                unsupported_ext += 1
+            skipped += 1
+            job["processed"] += 1
 
         # Explicit "spawn" context rather than relying on the platform
         # default ("fork" on Linux) - forking from a background thread
@@ -137,10 +259,10 @@ def _run_import_sync(files_data, name_overrides, job):
         # that class of problem entirely, at the cost of slightly slower
         # worker startup - negligible next to the actual parsing work.
         mp_context = multiprocessing.get_context("spawn")
-        parse_results = {}
+        parse_results = {}  # filename -> single result dict
         t_parse_start = time.time()
         with ProcessPoolExecutor(max_workers=MAX_PARSE_WORKERS, mp_context=mp_context) as executor:
-            futures = {executor.submit(_parse_one_file, filename, content): filename for filename, content in files_data}
+            futures = {executor.submit(_parse_single_entry, filename, content): filename for filename, content in expanded_files}
             for future in as_completed(futures):
                 filename = futures[future]
                 try:
@@ -157,7 +279,7 @@ def _run_import_sync(files_data, name_overrides, job):
         t_parse_done = time.time()
         logger.info(
             "[import] parallel parsing finished: %d files in %.1fs using up to %d workers",
-            len(files_data), t_parse_done - t_parse_start, MAX_PARSE_WORKERS,
+            len(expanded_files), t_parse_done - t_parse_start, MAX_PARSE_WORKERS,
         )
 
         # Saving stays sequential and in original file order (for
@@ -165,62 +287,98 @@ def _run_import_sync(files_data, name_overrides, job):
         # (confirmed via earlier timing logs), and SQLite doesn't handle
         # concurrent writers well, so there's no good reason to parallelize
         # this part too.
-        for filename, content in files_data:
+        for filename, content in expanded_files:
             result = parse_results.get(filename)
-            ext = result.get("ext", "(none)") if result else "(none)"
-            seen_extensions.add(ext)
-
             if result is None:
+                seen_extensions.add("(none)")
                 skipped += 1
-                continue
-            if result["status"] == "error":
-                logger.warning("Failed to parse %s: %s", filename, result.get("error"))
-                skipped += 1
-                continue
-            if result["status"] == "unsupported":
-                unsupported_ext += 1
-                skipped += 1
-                continue
-
-            source = result["source"]
-            parsed = result["parsed"]
-
-            base_filename = filename.rsplit("/", 1)[-1].strip().lower()
-            csv_override = name_overrides.get(base_filename) or {}
-            final_name = csv_override.get("title") or parsed["name"]
-
-            # Basename only, not the full uploaded path - a folder-based
-            # bulk upload and a single re-uploaded file (e.g. to pick up a
-            # parser fix) produce different paths for the exact same real
-            # file, which silently created a duplicate activity instead of
-            # updating the existing one (confirmed in practice - see
-            # database.py's one-time normalization of already-imported
-            # activities to this same basename-only form).
-            external_id = filename.rsplit("/", 1)[-1]
-
-            status, activity = _save_activity(
-                db, source=source, external_id=external_id,
-                name=final_name, points=parsed["points"],
-                distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
-                start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
-                elevation_gain_m=parsed.get("elevation_gain_m"),
-                elevation_loss_m=parsed.get("elevation_loss_m"),
-                avg_heart_rate=parsed.get("avg_heart_rate"),
-                max_heart_rate=parsed.get("max_heart_rate"),
-                avg_cadence=parsed.get("avg_cadence"),
-                calories=parsed.get("calories"),
-                elevation_profile=parsed.get("elevation_profile"),
-                heart_rate_profile=parsed.get("heart_rate_profile"),
-                time_profile=parsed.get("time_profile"),
-                strava_activity_id=csv_override.get("activity_id"),
-            )
-            if status == "added":
-                added += 1
-                added_activities.append(activity)
-            elif status == "updated":
-                updated += 1
             else:
-                unchanged += 1
+                ext = result.get("ext", "(none)")
+                seen_extensions.add(ext)
+                # Same as `filename` in practice (_parse_single_entry
+                # echoes back exactly what it was called with) - read from
+                # the result anyway rather than assumed, in case that ever
+                # changes.
+                result_filename = result.get("filename", filename)
+
+                if result["status"] == "error":
+                    logger.warning("Failed to parse %s: %s", result_filename, result.get("error"))
+                    skipped += 1
+                    continue
+                if result["status"] == "unsupported":
+                    unsupported_ext += 1
+                    skipped += 1
+                    continue
+                if result["status"] == "empty":
+                    empty_count += 1
+                    skipped += 1
+                    continue
+
+                source = result["source"]
+                parsed = result["parsed"]
+
+                base_filename = result_filename.rsplit("/", 1)[-1].strip().lower()
+                csv_override = name_overrides.get(base_filename) or {}
+                garmin_match = (
+                    match_by_start_time(garmin_index, parsed.get("start_time"), parsed.get("distance_m"))
+                    if garmin_index else None
+                )
+                final_name = csv_override.get("title") or (garmin_match and garmin_match["name"]) or parsed["name"]
+
+                # Basename only, not the full uploaded (or, for a zip
+                # member, in-zip) path - a folder-based bulk upload and a
+                # single re-uploaded file (e.g. to pick up a parser fix)
+                # produce different paths for the exact same real file,
+                # which silently created a duplicate activity instead of
+                # updating the existing one (confirmed in practice - see
+                # database.py's one-time normalization of already-imported
+                # activities to this same basename-only form). Using the
+                # inner filename here (not the wrapping .zip's own name)
+                # means a Garmin export's zipped "12345.fit" gets the same
+                # identity as if that same file were ever uploaded bare.
+                external_id = base_filename
+
+                status, activity = _save_activity(
+                    db, source=source, external_id=external_id,
+                    name=final_name, points=parsed["points"],
+                    distance_m=parsed["distance_m"], duration_s=parsed["duration_s"],
+                    start_time=parsed["start_time"], activity_type=parsed.get("activity_type"),
+                    elevation_gain_m=parsed.get("elevation_gain_m"),
+                    elevation_loss_m=parsed.get("elevation_loss_m"),
+                    avg_heart_rate=parsed.get("avg_heart_rate"),
+                    max_heart_rate=parsed.get("max_heart_rate"),
+                    avg_cadence=parsed.get("avg_cadence"),
+                    calories=parsed.get("calories"),
+                    elevation_profile=parsed.get("elevation_profile"),
+                    heart_rate_profile=parsed.get("heart_rate_profile"),
+                    time_profile=parsed.get("time_profile"),
+                    strava_activity_id=csv_override.get("activity_id"),
+                    garmin_activity_id=garmin_match["activity_id"] if garmin_match else None,
+                )
+                if status == "added":
+                    added += 1
+                    added_activities.append(activity)
+                    # Flush this one INSERT now rather than waiting for the
+                    # single flush at the end of the whole loop. This
+                    # session has autoflush off (see database.py), so
+                    # without this, _save_activity's own "does this
+                    # (source, external_id) already exist?" query can't see
+                    # a same-batch sibling that hasn't hit the database
+                    # yet - and a real Garmin bulk export does contain
+                    # exact duplicates this way (the same underlying raw
+                    # .fit file appearing in more than one
+                    # DI-Connect-Uploaded-Files zip), which without this
+                    # produced two pending INSERTs for the same
+                    # (source, external_id) and crashed the whole import
+                    # with a UNIQUE constraint failure at the final flush,
+                    # confirmed against a real export. With this, the
+                    # second occurrence's lookup finds the first (now
+                    # flushed) row and correctly merges into it instead.
+                    db.flush()
+                elif status == "updated":
+                    updated += 1
+                else:
+                    unchanged += 1
 
         t_save_done = time.time()
         logger.info("[import] sequential save phase finished in %.1fs", t_save_done - t_parse_done)
@@ -247,8 +405,33 @@ def _run_import_sync(files_data, name_overrides, job):
                     changed_here = True
                 if changed_here:
                     updated += 1
+        # Same idea for a Garmin export's summarized-activities JSON,
+        # matched by start time instead of filename (see
+        # garmin_summarized.py) - covers both "just re-uploaded the JSON
+        # files on their own to backfill names/links onto an already-
+        # imported history" and any fit/gpx/tcx activity that came in
+        # earlier in this SAME batch before the matching record was
+        # parsed (upload order isn't guaranteed). Only overwrites the
+        # stored name when it still looks like the raw-filename fallback
+        # this is specifically fixing - never something the user (or the
+        # "Rename all activities by city" feature) set on purpose.
+        if garmin_index:
+            for act in db.query(Activity).filter(Activity.source.in_(["gpx", "fit", "tcx"])).all():
+                match = match_by_start_time(garmin_index, act.start_time, act.distance_m)
+                if not match:
+                    continue
+                changed_here = False
+                if match["name"] and (not act.name or "/" in act.name or act.name.lower().endswith((".fit", ".gpx", ".tcx"))):
+                    act.name = match["name"]
+                    changed_here = True
+                if act.garmin_activity_id != match["activity_id"]:
+                    act.garmin_activity_id = match["activity_id"]
+                    changed_here = True
+                if changed_here:
+                    updated += 1
+
         t_backfill_done = time.time()
-        if name_overrides:
+        if name_overrides or garmin_index:
             logger.info("[import] name backfill finished in %.1fs", t_backfill_done - t_save_done)
 
         db.flush()
@@ -293,8 +476,9 @@ def _run_import_sync(files_data, name_overrides, job):
             t_backfill_done - t_save_done, t_commit_done - t_backfill_done, t_match_done - t_match_start,
         )
         logger.info(
-            "Upload finished: %s added, %s updated, %s unchanged, %s skipped (%s unsupported extension). Extensions seen: %s",
-            added, updated, unchanged, skipped, unsupported_ext, sorted(seen_extensions),
+            "Upload finished: %s added, %s updated, %s unchanged, %s skipped "
+            "(%s unsupported extension, %s with no usable activity data). Extensions seen: %s",
+            added, updated, unchanged, skipped, unsupported_ext, empty_count, sorted(seen_extensions),
         )
 
         job["phase"] = "done"
@@ -303,6 +487,7 @@ def _run_import_sync(files_data, name_overrides, job):
         job["unchanged"] = unchanged
         job["skipped"] = skipped
         job["unsupported"] = unsupported_ext
+        job["empty"] = empty_count
     except Exception as e:
         logger.exception("Import job failed")
         job["phase"] = "error"
@@ -333,7 +518,8 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
                     elevation_loss_m=None, avg_heart_rate=None,
                     max_heart_rate=None, avg_cadence=None, calories=None,
                     elevation_profile=None, heart_rate_profile=None,
-                    time_profile=None, strava_activity_id=None):
+                    time_profile=None, strava_activity_id=None,
+                    garmin_activity_id=None):
     """Returns ("added", activity), ("updated", activity), or ("unchanged", activity)."""
     activity_type = normalize_activity_type(activity_type or "Other")
     existing = db.query(Activity).filter_by(source=source, external_id=external_id).first()
@@ -346,6 +532,7 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         "avg_cadence": avg_cadence,
         "calories": calories,
         "strava_activity_id": strava_activity_id,
+        "garmin_activity_id": garmin_activity_id,
     }
     # Stored as JSON text, so encoded once here rather than repeating the
     # same json.dumps(...) at each of the three places these get written.
@@ -366,14 +553,22 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         if name and existing.name != name:
             existing.name = name
             changed = True
-        # distance_m is handled explicitly here (not via extra_fields,
-        # unlike the other simple fields below) because it's ALSO passed
-        # explicitly to Activity() further down in the new-activity branch
-        # - adding it to extra_fields as well caused Python to raise
-        # "got multiple values for keyword argument 'distance_m'" there,
-        # since **extra_fields would then supply it a second time.
+        # distance_m/duration_s are handled explicitly here (not via
+        # extra_fields, unlike the other simple fields below) because both
+        # are ALSO passed explicitly to Activity() further down in the
+        # new-activity branch - adding them to extra_fields as well caused
+        # Python to raise "got multiple values for keyword argument..."
+        # there, since **extra_fields would then supply each a second
+        # time. duration_s missing this same explicit re-check used to
+        # mean a re-uploaded file could never correct an already-stored
+        # wrong duration (confirmed in practice: a fix to how .fit
+        # duration itself gets computed - see fit_parser.py - silently
+        # failed to apply on re-upload until this was added too).
         if existing.distance_m != distance_m:
             existing.distance_m = distance_m
+            changed = True
+        if duration_s is not None and existing.duration_s != duration_s:
+            existing.duration_s = duration_s
             changed = True
         for field, value in extra_fields.items():
             if value is not None and getattr(existing, field) != value:
@@ -500,12 +695,37 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
             "unsupported": request.query_params.get("unsupported", "0"),
         }
 
+    type_merge_result = None
+    if "type_merge_changed" in request.query_params:
+        type_merge_result = {
+            "changed": request.query_params.get("type_merge_changed", "0"),
+            "from_types": request.query_params.get("type_merge_from", ""),
+            "to_type": request.query_params.get("type_merge_to", ""),
+        }
+
+    # Every distinct type currently in use, with how many activities carry
+    # it - powers the "Merge activity types" form's checkbox list below,
+    # so it always reflects whatever mix of types this user's own data
+    # actually has instead of a fixed guess at what needs merging.
+    activity_types = [
+        {"name": t, "count": c}
+        for t, c in (
+            db.query(Activity.activity_type, func.count(Activity.id))
+            .group_by(Activity.activity_type)
+            .order_by(Activity.activity_type)
+            .all()
+        )
+        if t
+    ]
+
     return templates.TemplateResponse("manage.html", {
         "request": request,
         "total_activities": total_activities,
         "strava_connected": strava_connected,
         "strava_configured": strava_client.is_configured(),
         "upload_result": upload_result,
+        "type_merge_result": type_merge_result,
+        "activity_types": activity_types,
         "garmin_configured": garmin_client.is_configured(),
         "garmin_has_session": garmin_client.has_saved_session(),
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
@@ -569,6 +789,7 @@ async def upload_gpx(request: Request):
     # background thread, by which point these UploadFile objects can no
     # longer be read from.
     name_overrides = {}
+    garmin_summarized_records = []
     files_data = []  # list of (filename, content_bytes)
     for f in files:
         if not (hasattr(f, "filename") and hasattr(f, "read")):
@@ -583,10 +804,23 @@ async def upload_gpx(request: Request):
                 logger.info("Loaded %d entries (titles/activity IDs) from %s", len(found), filename)
             except Exception as e:
                 logger.warning("Failed to parse %s: %s", filename, e)
+        elif filename.lower().endswith("summarizedactivities.json"):
+            try:
+                found = parse_garmin_summarized_activities(content)
+                garmin_summarized_records.extend(found)
+                logger.info("Loaded %d activity record(s) from %s", len(found), filename)
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", filename, e)
         else:
             files_data.append((filename, content))
 
-    if not files_data and not name_overrides:
+    # Garmin paginates this export (e.g. a "_0_" and "_1001_" file for
+    # 1000 activities each) - combined into one lookup here, covering
+    # whatever range of the account history got uploaded, regardless of
+    # which specific file each record came from.
+    garmin_index = build_start_time_index(garmin_summarized_records) if garmin_summarized_records else None
+
+    if not files_data and not name_overrides and not garmin_index:
         return local_redirect(request, "/manage?imported=0&updated=0&skipped=0&duplicates=0&unsupported=0")
 
     _current_import_job.clear()
@@ -598,7 +832,7 @@ async def upload_gpx(request: Request):
         "match_done": 0,
         "match_total": 0,
         "started_at": time.time(),
-        "added": 0, "updated": 0, "unchanged": 0, "skipped": 0, "unsupported": 0,
+        "added": 0, "updated": 0, "unchanged": 0, "skipped": 0, "unsupported": 0, "empty": 0,
         "error": None,
     })
 
@@ -606,7 +840,7 @@ async def upload_gpx(request: Request):
     # as a fire-and-forget task the request doesn't wait on - so it keeps
     # running to completion regardless of whether the browser navigates
     # away or even closes entirely.
-    _spawn_background_task(asyncio.to_thread(_run_import_sync, files_data, name_overrides, _current_import_job))
+    _spawn_background_task(asyncio.to_thread(_run_import_sync, files_data, name_overrides, garmin_index, _current_import_job))
 
     return local_redirect(request, "/manage")
 
@@ -1380,38 +1614,68 @@ def normalize_types_route(request: Request, db: Session = Depends(get_db)):
     return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
 
 
-DEFAULT_LEGACY_TYPE_CUTOFF = "2026-04-01"
+@app.post("/merge-activity-types")
+def merge_activity_types_route(request: Request, from_types: list[str] = Form(...),
+                                to_type: str = Form(...), cutoff_date: str = Form(""),
+                                db: Session = Depends(get_db)):
+    """Relabels every activity currently tagged with one of `from_types` to
+    `to_type` - e.g. merging "Walking" and "Hiking" into one canonical
+    "Hiking" because an old watch only offered a limited choice of types,
+    or any other combination someone's own data needs. Both sides are
+    picked freely in the "Merge activity types" form (manage.html) from
+    whatever types actually exist, rather than a fixed set of hardcoded
+    pairs. `cutoff_date`, if given, scopes the merge to activities that
+    started before that date, same as the old hardcoded legacy-type merge
+    this replaces."""
+    to_type = to_type.strip()
+    checked_types = sorted({t.strip() for t in from_types if t.strip()})
 
-
-@app.post("/merge-legacy-types")
-def merge_legacy_types_route(request: Request, cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF),
-                              db: Session = Depends(get_db)):
-    try:
-        cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
-    except ValueError:
+    if not to_type or not checked_types:
         return HTMLResponse(
-            f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p>"
-            f"<p><a href='{ingress_prefix(request)}/'>back</a></p>",
+            "<p>Pick at least one type to merge from, and a destination type.</p>"
+            f"<p><a href='{ingress_prefix(request)}/manage'>back</a></p>",
             status_code=400,
         )
 
-    changed = 0
-    activities = (
-        db.query(Activity)
-        .filter(Activity.start_time.isnot(None))
-        .filter(Activity.start_time < cutoff_dt)
-        .all()
-    )
+    # A type checked as both source and destination would be a silent
+    # no-op for that one type anyway - dropped here so the "N activities
+    # updated" count below only reflects types that actually changed. If
+    # that was the ONLY type checked, this naturally falls through to the
+    # "no activities matched" branch below rather than a dead-end error,
+    # since checked_types (used for the feedback message) still has it.
+    from_types = [t for t in checked_types if t != to_type]
+
+    cutoff_dt = None
+    if cutoff_date:
+        try:
+            cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
+        except ValueError:
+            return HTMLResponse(
+                f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p>"
+                f"<p><a href='{ingress_prefix(request)}/manage'>back</a></p>",
+                status_code=400,
+            )
+
+    query = db.query(Activity).filter(Activity.activity_type.in_(from_types))
+    if cutoff_dt is not None:
+        query = query.filter(Activity.start_time.isnot(None)).filter(Activity.start_time < cutoff_dt)
+
+    activities = query.all()
     for act in activities:
-        new_type = merge_legacy_type(act.activity_type)
-        if new_type != act.activity_type:
-            act.activity_type = new_type
-            changed += 1
+        act.activity_type = to_type
+    changed = len(activities)
     if changed:
         db.commit()
         rebuild_groups(db)  # merged types can change which activities group together
-    logger.info("Legacy type merge (activities before %s): %d activities updated", cutoff_date, changed)
-    return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
+    logger.info("Activity type merge (%s -> %s%s): %d activities updated",
+                ", ".join(checked_types), to_type, f", before {cutoff_date}" if cutoff_date else "", changed)
+
+    query_string = urlencode({
+        "type_merge_changed": changed,
+        "type_merge_from": ", ".join(checked_types),
+        "type_merge_to": to_type,
+    })
+    return local_redirect(request, f"/manage?{query_string}")
 
 
 @app.post("/dedupe")

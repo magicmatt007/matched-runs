@@ -11,6 +11,56 @@ import fitparse
 from app.elevation_utils import gain_loss_from_elevations
 
 
+def _collect_pause_intervals(fitfile):
+    """Returns a list of (stop_ts, start_ts) pairs - each a period the
+    device's timer was paused (manually, or Garmin's own "Auto Pause"
+    stopping the clock at every stoplight) - from the FIT file's own
+    "timer" event messages, which mark every start/stop_all transition
+    with a real timestamp. This is what a paused activity's
+    total_timer_time (see the "duration" comment below) already accounts
+    for; used here to make the per-point elapsed-time chart data agree
+    with it too, instead of ballooning by however long the pauses lasted
+    the way plain wall-clock timestamp math would."""
+    intervals = []
+    pending_stop = None
+    for event in fitfile.get_messages("event"):
+        efields = {f.name: f.value for f in event}
+        if efields.get("event") != "timer":
+            continue
+        ts = efields.get("timestamp")
+        if ts is None:
+            continue
+        event_type = efields.get("event_type")
+        if event_type in ("stop_all", "stop"):
+            pending_stop = ts
+        elif event_type == "start" and pending_stop is not None:
+            if ts > pending_stop:
+                intervals.append((pending_stop, ts))
+            pending_stop = None
+    return intervals
+
+
+def _subtract_pauses(timestamps, start_time, pause_intervals):
+    """Per-point elapsed seconds since start_time, with any paused
+    duration (see _collect_pause_intervals) that occurred before each
+    point excluded - so the last point's value lines up with
+    total_timer_time instead of the (pause-inflated) wall-clock gap
+    between the first and last recorded point."""
+    result = []
+    for t in timestamps:
+        if t is None:
+            result.append(None)
+            continue
+        raw_elapsed = (t - start_time).total_seconds()
+        paused = sum(
+            (min(pause_start, t) - pause_stop).total_seconds()
+            for pause_stop, pause_start in pause_intervals
+            if pause_stop < t
+        )
+        result.append(max(0.0, raw_elapsed - paused))
+    return result
+
+
 def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
     fitfile = fitparse.FitFile(io.BytesIO(data))
 
@@ -73,7 +123,23 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         d = sfields.get("total_distance")
         if d:
             distance_m = float(d)
-        t = sfields.get("total_elapsed_time")
+        # total_timer_time (actual recording/moving time) rather than
+        # total_elapsed_time (wall-clock time from start to stop,
+        # INCLUDING any paused period) - confirmed directly against a
+        # real ride: pausing partway through inflated total_elapsed_time
+        # to 5h55m for a ride whose total_timer_time (and Garmin's own
+        # live-synced API "duration" for the same kind of ride) was more
+        # like 4h55m. Garmin Connect's own displayed duration - and this
+        # app's live Garmin/Strava sync, which use the API's equivalent
+        # field - already means "timer time", so using elapsed_time here
+        # made file-based imports inconsistent with those for the exact
+        # same activity. Falls back to total_elapsed_time on the rare
+        # device/firmware that omits total_timer_time (it's supposed to
+        # always be present per the FIT spec, but better an overstated
+        # duration than none at all).
+        t = sfields.get("total_timer_time")
+        if t is None:
+            t = sfields.get("total_elapsed_time")
         if t:
             duration_s = float(t)
         sp = sfields.get("sport")
@@ -116,17 +182,36 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         if elevation_loss_m is None:
             elevation_loss_m = computed_loss
 
-    name = fallback_name
     activity_type = sport.replace("_", " ").title() if sport else None
+    # A .fit file has no free-text title field at all (unlike GPX, which
+    # sometimes carries one) - Garmin Connect itself only ever shows a
+    # generic name like "Running" until you rename it, so that's a far
+    # better default here than the raw uploaded filename/path, which is
+    # meaningless to a person and (for a bulk Garmin export in particular)
+    # can be a long zip-nested path. Only falls all the way back to that
+    # when even the sport type is missing. The caller (main.py's import,
+    # for a Garmin export) can still supply a real name recovered from
+    # Garmin's own summarized-activities export, taking priority over
+    # this either way.
+    name = activity_type or fallback_name
 
     # Elapsed seconds since the activity's start, one per point - computed
     # here (after start_time is fully finalized, since the session message
     # above can also supply/override it) rather than during the record
-    # loop. Needed to derive pace at each point later - not itself
-    # displayed anywhere.
+    # loop. Needed to derive pace at each point later, AND shown directly
+    # as the activity detail page's "Time" x-axis option - paused periods
+    # are subtracted out (see _collect_pause_intervals/_subtract_pauses),
+    # otherwise a paused ride's chart stretched all the way out to its
+    # inflated total_elapsed_time (confirmed directly: 5h55m instead of
+    # the correct ~4h55m for a ride with several stops), even after
+    # "duration" above was fixed to show the right number.
     time_profile = None
     if start_time is not None and any(t is not None for t in timestamps):
-        time_profile = [(t - start_time).total_seconds() if t is not None else None for t in timestamps]
+        pause_intervals = _collect_pause_intervals(fitfile)
+        if pause_intervals:
+            time_profile = _subtract_pauses(timestamps, start_time, pause_intervals)
+        else:
+            time_profile = [(t - start_time).total_seconds() if t is not None else None for t in timestamps]
 
     if isinstance(start_time, datetime):
         start_time = start_time.replace(tzinfo=None)

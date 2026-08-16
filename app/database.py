@@ -58,6 +58,7 @@ def run_migrations():
     ensure_column("activities", "heart_rate_profile_json", "TEXT")
     ensure_column("activities", "time_profile_json", "TEXT")
     ensure_column("activities", "strava_activity_id", "VARCHAR")
+    ensure_column("activities", "garmin_activity_id", "VARCHAR")
 
     # File-based external_id previously stored the exact uploaded filename,
     # including any folder path (e.g. "export_12345/activities/123.gpx").

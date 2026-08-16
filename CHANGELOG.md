@@ -1,5 +1,140 @@
 # Changelog
 
+## 1.17.8
+- Fixed a paused .fit activity's duration being overstated by however
+  long it was paused for. Garmin's .fit format records two separate
+  fields - total_elapsed_time (wall-clock from start to stop, including
+  any paused period) and total_timer_time (actual recording/moving time,
+  excluding pauses) - and the parser was using the former. Live Garmin/
+  Strava sync were unaffected (their APIs already report the timer-time
+  equivalent), which is why the same route's duration looked wildly
+  inconsistent depending on which import path an activity came through.
+  Now uses total_timer_time, falling back to total_elapsed_time only if
+  a device/firmware omits it.
+  - The activity detail page's charts had the same problem one level
+    deeper: even after the summary duration was fixed, the "Time" x-axis
+    still stretched out to the pause-inflated wall-clock length, since
+    per-point elapsed time was computed from raw GPS-point timestamps
+    (which genuinely span the paused gap). Now uses the .fit file's own
+    "timer" event messages (which mark every pause/resume with a real
+    timestamp - including Garmin's "Auto Pause" at stoplights, not just
+    manual pauses) to subtract paused periods from each point's elapsed
+    time too, so the chart's end lines up with the corrected duration.
+  - Also fixed a re-upload never being able to correct an already-stored
+    wrong duration_s at all (only distance_m had this explicit re-check
+    on an existing activity, not duration_s) - otherwise this fix
+    couldn't apply to activities already imported before it existed.
+  - Verified against a real paused ride: duration dropped from 5h55m to
+    4h55m (matching total_timer_time to the second), the "Time" chart's
+    last point now lines up with that corrected duration, and comparing
+    the same ~93km route across four rides (two live-synced, two file-
+    imported) now shows consistent durations (4h36m-5h06m) instead of the
+    file-imported ones being inflated by up to an hour. Re-ran the full
+    import against the real export to backfill every already-imported
+    activity (1106 updated, 0 added - no duplicates).
+
+## 1.17.7
+- Fixed two problems specific to importing a Garmin "Export Your Data"
+  account archive (1.17.6 made the import itself work; these are about
+  the quality of what it imports): activities showed up named after
+  their raw uploaded filename/path instead of anything meaningful, and
+  had no "View on Garmin" link at all.
+  - Root cause for both: a raw .fit file has no free-text title field,
+    and the number embedded in its own filename is NOT the real Garmin
+    activity ID (confirmed directly - that number 404s against Garmin's
+    own API, even though it looks just as plausible as a real one, the
+    same trap this app already avoided for Strava's export filenames).
+  - Fix: Garmin's export also includes
+    DI-Connect-Fitness/*_summarizedActivities.json - a full dump of every
+    activity Garmin Connect knows about, each with its real name and real
+    numeric activity ID. There's no filename/ID shared with the raw .fit
+    file to join on directly, so activities are matched by start time
+    instead (within a tolerance, since the two timestamps aren't always
+    identical to the second even for a genuine match - confirmed
+    directly, one real pair was 15s apart), cross-checked by distance to
+    guard against a wrong match. New `garmin_activity_id` column
+    (mirroring the existing `strava_activity_id`) stores the recovered
+    ID for the "View on Garmin" link; matching also backfills the name.
+  - Also applies retroactively: uploading just the summarizedActivities
+    JSON files (no need to re-upload the raw .fit files) backfills name
+    and link onto activities already imported - useful both for an
+    export re-download and for fixing the activities 1.17.6 already
+    imported before this existed.
+  - Fit-file activities with no match at all (e.g. no
+    summarizedActivities.json uploaded) now at least default to their
+    sport type ("Running", "Hiking", ...) instead of the raw filename -
+    still generic, but meaningfully better than before.
+  - Verified against a real Garmin export: matched 1739 of 1744
+    (99.7%) already-imported file-based activities to their real name
+    and a Garmin activity ID confirmed (via a direct API call) to
+    resolve to that exact activity.
+
+## 1.17.6
+- Fixed bulk-importing a full Garmin "Export Your Data" account archive,
+  which previously failed completely - every file came back "unsupported
+  file type" (0 imported). Garmin's export wraps each raw uploaded file
+  in DI-Connect-Uploaded-Files inside its own individual .zip rather than
+  a bare .fit/.gpx/.tcx (unlike the single-activity "Export to GPX"
+  download this app was built against) - uploaded zips are now unzipped
+  and their contents imported, recursively (so a zip-of-zips works too).
+  Three follow-on issues, all found and fixed against a real ~240MB
+  export:
+  - The same underlying raw file can legitimately appear in more than one
+    of Garmin's export zips - previously crashed the entire import
+    partway through with a database UNIQUE constraint error once two
+    same-named files landed in one batch, since new activities were only
+    written to the database once, at the very end (this session runs
+    with autoflush off) - so an earlier duplicate in the same batch
+    wasn't yet visible to the "does this already exist?" check. Now
+    flushed immediately so a same-batch repeat is correctly recognized
+    and merged instead.
+  - The import's progress bar tracked one increment per *uploaded* file -
+    fine for individual .fit/.gpx/.tcx files, but Garmin's account export
+    is a handful of zips each containing thousands of individual
+    activity files, so the bar sat "stuck" at or near 100% for most of
+    the import while a single worker ground through one huge zip alone.
+    Zips are now expanded into their individual files up front, before
+    any worker starts, so progress reflects real per-file counts and the
+    parse pool distributes a big zip's contents across all workers
+    instead of serializing on one.
+  - Garmin's raw upload archive also carries plain monitoring/wellness
+    .fit snapshots (heart rate, steps, etc.) that were never a recorded
+    activity, alongside real workouts - tens of thousands of them in
+    practice. These parsed "successfully" to a completely empty result
+    (no GPS points, no duration, no distance) and were being imported as
+    bogus zero-distance activities. Now recognized and skipped as having
+    "no usable activity data", reported as its own count separate from
+    "unsupported file type" so a bulk import's summary stays meaningful
+    at this scale. A genuine indoor activity (real duration/distance, no
+    GPS) is unaffected - only files with literally nothing usable are
+    caught by this.
+  - Verified end to end against a real Garmin account export (182
+    top-level items expanding to ~50,000 individual files): completes
+    without error, progress advances steadily instead of stalling, and
+    the ~44,000 monitoring-snapshot files are correctly skipped rather
+    than imported - recovering 1944 of an originally-1952-activity
+    database (the small gap being pre-existing edge cases, not files
+    this import touched).
+
+## 1.17.5
+- Replaced the hardcoded "Merge legacy types" action (which only knew two
+  fixed pairs: Hiking/Walking and Kayaking/Rowing) with a fully
+  customizable "Merge activity types" form - checkboxes for every type
+  actually present in your data (with its activity count), merged into
+  any destination type you type or pick (existing or new). The date
+  cutoff is still available but now optional, via its own checkbox.
+  Also adds a clear result panel after submitting ("4 activities
+  relabeled from Training, Other to Cross training" / "No activities
+  matched X - nothing was changed") - the old flow gave no feedback
+  specific to the merge at all.
+  - Verified against the real running app: the checkbox/count list
+    renders correctly from real data, HTML5 validation blocks an empty
+    destination, the cutoff-date checkbox correctly enables/disables the
+    date field, and both the success and no-op feedback panels render
+    correctly. The route's filtering/redirect logic was exercised via a
+    harmless self-merge (a type merged into itself, which correctly
+    no-ops) rather than a real merge on live data.
+
 ## 1.17.4
 - The activity detail page's Elevation, Pace/Speed, and Heart Rate charts
   can now switch their x-axis between distance and elapsed time via a
