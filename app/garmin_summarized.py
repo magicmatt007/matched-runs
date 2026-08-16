@@ -23,6 +23,7 @@ own API confirmed resolves to that exact activity.
 """
 import calendar
 import json
+import re
 from datetime import timezone
 
 # Garmin's export gives distance/elevation in centimeters and duration in
@@ -31,14 +32,46 @@ from datetime import timezone
 _CM_TO_M = 100.0
 _MS_TO_S = 1000.0
 
+# A trailing "_ws" tag Garmin adds to some winter-sport activityType
+# values (e.g. "cross_country_skiing_ws", "skate_skiing_ws") - meaningless
+# on its own once title-cased, so dropped the same way a "V2" version
+# suffix already gets stripped elsewhere (normalize_activity_type, applied
+# to whatever this module returns once it reaches _save_activity).
+_TRAILING_WS_TAG_RE = re.compile(r"\s+ws$", re.IGNORECASE)
+
+
+def _format_activity_type(raw):
+    """Garmin's activityType values (e.g. "inline_skating",
+    "resort_skiing_snowboarding_ws") use the same snake_case convention
+    a .fit file's own `sport` field does (see fit_parser.py) - and this
+    app already title-cases that the same simple way, so no separate
+    vocabulary mapping is needed here the way Strava's activities.csv
+    needed one (see strava_csv.py's STRAVA_TYPE_MAP - Strava's own words,
+    like "Ride" for cycling, genuinely don't match Garmin's)."""
+    if not raw:
+        return None
+    formatted = raw.replace("_", " ").title()
+    formatted = _TRAILING_WS_TAG_RE.sub("", formatted).strip()
+    return formatted or None
+
 
 def parse_summarized_activities(data: bytes) -> list:
     """Returns a list of {"activity_id": str, "name": str or None,
-    "start_ts_ms": int, "distance_m": float or None} - one per activity
-    record found. Garmin paginates this export (e.g. a "_0_" and "_1001_"
-    file for 1000 activities each) - call this once per uploaded file and
-    combine the results into one lookup covering the whole account
-    history (see build_start_time_index)."""
+    "activity_type": str or None, "start_ts_ms": int, "distance_m": float
+    or None} - one per activity record found. Garmin paginates this
+    export (e.g. a "_0_" and "_1001_" file for 1000 activities each) -
+    call this once per uploaded file and combine the results into one
+    lookup covering the whole account history (see
+    build_start_time_index).
+
+    activity_type matters because a raw .fit/.tcx file doesn't always
+    carry an accurate one either - confirmed directly: a real activity
+    Garmin itself classifies as "inline_skating" here came from a raw TCX
+    file whose own Sport attribute could only say "Other" (TCX v2's Sport
+    enum is limited to Running/Biking/Other, nothing else - not a parsing
+    bug, a hard limit of the file format), even though the exported
+    filename happened to say "Skating" (leaked from the original Polar
+    device's own naming, not read by this app's TCX parser)."""
     try:
         payload = json.loads(data.decode("utf-8", errors="ignore"))
     except Exception:
@@ -59,6 +92,7 @@ def parse_summarized_activities(data: bytes) -> list:
             records.append({
                 "activity_id": str(activity_id),
                 "name": (entry.get("name") or "").strip() or None,
+                "activity_type": _format_activity_type(entry.get("activityType")),
                 "start_ts_ms": int(begin_ts),
                 "distance_m": (distance_cm / _CM_TO_M) if distance_cm is not None else None,
             })

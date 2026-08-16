@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.17.11
+- Recovered the correct activity type for both Strava and Garmin file-
+  based imports, instead of a generic "Other" - reported after a real
+  activity ("Morning Skate", an inline skate) showed as "Other" despite
+  being correctly classified on Strava.
+  - Root cause: a raw TCX file's own `Sport` attribute can only ever be
+    "Running", "Biking", or "Other" - that's the entire enum the TCX v2
+    schema allows, regardless of source or which app originally recorded
+    it. Confirmed directly against the actual reported activity: both
+    the Strava-exported and Garmin-exported copies of the identical TCX
+    file say `Sport="Other"`, even though the Garmin filename itself
+    happened to say "Skating" (leaked from the original Polar device's
+    naming, never read by this app's parser).
+  - Fix: both `activities.csv` (Strava) and `summarizedActivities.json`
+    (Garmin) - the same files this app already uses to recover real
+    names and links - also carry the real classification, now used to
+    backfill activity_type too, with the same "only applies when
+    present" and retroactive-backfill-on-reimport behavior as the
+    name/link recovery. Strava's vocabulary ("Ride", "Alpine Ski")
+    doesn't match this app's own (Garmin-derived) naming, so it goes
+    through an explicit mapping table rather than being used as-is, to
+    avoid fragmenting the type list or breaking cycling detection.
+    Garmin's own vocabulary already matches (same snake_case convention
+    already used for a .fit file's own sport field), so it only needed
+    its internal `_v2`/`_ws` tags stripped.
+  - Fixed a bug introduced by this same change before it was ever
+    released: the retroactive backfill for already-imported activities
+    wrote the recovered type straight to the database, bypassing the
+    same version-suffix stripping every other code path already goes
+    through - so a Garmin type like `kayaking_v2` reappeared as
+    "Kayaking V2" instead of "Kayaking". Caught via manual testing before
+    shipping, not a real-world report.
+  - Verified against the actual reported activity and its exact
+    Strava/Garmin files: confirmed the TCX limitation directly, backfilled
+    the correct type ("Inline Skating") through each recovery path
+    independently by resetting and re-testing one at a time, and verified
+    the version-suffix fix at the unit level for every Garmin type
+    string containing a version/tag suffix seen in the real export.
+
 ## 1.17.10
 - Fixed cross-source duplicate detection (both at import time and the
   "Merge duplicate activities" button) never catching the same real
