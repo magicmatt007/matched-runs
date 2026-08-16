@@ -1,5 +1,88 @@
 # Changelog
 
+## 1.17.7
+- Fixed two problems specific to importing a Garmin "Export Your Data"
+  account archive (1.17.6 made the import itself work; these are about
+  the quality of what it imports): activities showed up named after
+  their raw uploaded filename/path instead of anything meaningful, and
+  had no "View on Garmin" link at all.
+  - Root cause for both: a raw .fit file has no free-text title field,
+    and the number embedded in its own filename is NOT the real Garmin
+    activity ID (confirmed directly - that number 404s against Garmin's
+    own API, even though it looks just as plausible as a real one, the
+    same trap this app already avoided for Strava's export filenames).
+  - Fix: Garmin's export also includes
+    DI-Connect-Fitness/*_summarizedActivities.json - a full dump of every
+    activity Garmin Connect knows about, each with its real name and real
+    numeric activity ID. There's no filename/ID shared with the raw .fit
+    file to join on directly, so activities are matched by start time
+    instead (within a tolerance, since the two timestamps aren't always
+    identical to the second even for a genuine match - confirmed
+    directly, one real pair was 15s apart), cross-checked by distance to
+    guard against a wrong match. New `garmin_activity_id` column
+    (mirroring the existing `strava_activity_id`) stores the recovered
+    ID for the "View on Garmin" link; matching also backfills the name.
+  - Also applies retroactively: uploading just the summarizedActivities
+    JSON files (no need to re-upload the raw .fit files) backfills name
+    and link onto activities already imported - useful both for an
+    export re-download and for fixing the activities 1.17.6 already
+    imported before this existed.
+  - Fit-file activities with no match at all (e.g. no
+    summarizedActivities.json uploaded) now at least default to their
+    sport type ("Running", "Hiking", ...) instead of the raw filename -
+    still generic, but meaningfully better than before.
+  - Verified against a real Garmin export: matched 1739 of 1744
+    (99.7%) already-imported file-based activities to their real name
+    and a Garmin activity ID confirmed (via a direct API call) to
+    resolve to that exact activity.
+
+## 1.17.6
+- Fixed bulk-importing a full Garmin "Export Your Data" account archive,
+  which previously failed completely - every file came back "unsupported
+  file type" (0 imported). Garmin's export wraps each raw uploaded file
+  in DI-Connect-Uploaded-Files inside its own individual .zip rather than
+  a bare .fit/.gpx/.tcx (unlike the single-activity "Export to GPX"
+  download this app was built against) - uploaded zips are now unzipped
+  and their contents imported, recursively (so a zip-of-zips works too).
+  Three follow-on issues, all found and fixed against a real ~240MB
+  export:
+  - The same underlying raw file can legitimately appear in more than one
+    of Garmin's export zips - previously crashed the entire import
+    partway through with a database UNIQUE constraint error once two
+    same-named files landed in one batch, since new activities were only
+    written to the database once, at the very end (this session runs
+    with autoflush off) - so an earlier duplicate in the same batch
+    wasn't yet visible to the "does this already exist?" check. Now
+    flushed immediately so a same-batch repeat is correctly recognized
+    and merged instead.
+  - The import's progress bar tracked one increment per *uploaded* file -
+    fine for individual .fit/.gpx/.tcx files, but Garmin's account export
+    is a handful of zips each containing thousands of individual
+    activity files, so the bar sat "stuck" at or near 100% for most of
+    the import while a single worker ground through one huge zip alone.
+    Zips are now expanded into their individual files up front, before
+    any worker starts, so progress reflects real per-file counts and the
+    parse pool distributes a big zip's contents across all workers
+    instead of serializing on one.
+  - Garmin's raw upload archive also carries plain monitoring/wellness
+    .fit snapshots (heart rate, steps, etc.) that were never a recorded
+    activity, alongside real workouts - tens of thousands of them in
+    practice. These parsed "successfully" to a completely empty result
+    (no GPS points, no duration, no distance) and were being imported as
+    bogus zero-distance activities. Now recognized and skipped as having
+    "no usable activity data", reported as its own count separate from
+    "unsupported file type" so a bulk import's summary stays meaningful
+    at this scale. A genuine indoor activity (real duration/distance, no
+    GPS) is unaffected - only files with literally nothing usable are
+    caught by this.
+  - Verified end to end against a real Garmin account export (182
+    top-level items expanding to ~50,000 individual files): completes
+    without error, progress advances steadily instead of stalling, and
+    the ~44,000 monitoring-snapshot files are correctly skipped rather
+    than imported - recovering 1944 of an originally-1952-activity
+    database (the small gap being pre-existing edge cases, not files
+    this import touched).
+
 ## 1.17.5
 - Replaced the hardcoded "Merge legacy types" action (which only knew two
   fixed pairs: Hiking/Walking and Kayaking/Rowing) with a fully

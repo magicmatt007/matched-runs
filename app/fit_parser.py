@@ -116,8 +116,18 @@ def parse_fit_bytes(data: bytes, fallback_name: str = "Run"):
         if elevation_loss_m is None:
             elevation_loss_m = computed_loss
 
-    name = fallback_name
     activity_type = sport.replace("_", " ").title() if sport else None
+    # A .fit file has no free-text title field at all (unlike GPX, which
+    # sometimes carries one) - Garmin Connect itself only ever shows a
+    # generic name like "Running" until you rename it, so that's a far
+    # better default here than the raw uploaded filename/path, which is
+    # meaningless to a person and (for a bulk Garmin export in particular)
+    # can be a long zip-nested path. Only falls all the way back to that
+    # when even the sport type is missing. The caller (main.py's import,
+    # for a Garmin export) can still supply a real name recovered from
+    # Garmin's own summarized-activities export, taking priority over
+    # this either way.
+    name = activity_type or fallback_name
 
     # Elapsed seconds since the activity's start, one per point - computed
     # here (after start_time is fully finalized, since the session message

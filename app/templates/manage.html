@@ -287,12 +287,25 @@
                     progressBar(frac) +
                     etaLine(frac, job.started_at);
             } else if (job.phase === 'done') {
+                // Zip-nested bulk uploads (e.g. a Garmin account export)
+                // can skip files for two quite different reasons - worth
+                // distinguishing rather than lumping into one "skipped"
+                // count: an unsupported file type (a stray .json/.jpg
+                // sitting next to the real activity files) vs. a
+                // syntactically valid activity file with nothing usable
+                // in it at all (Garmin's raw upload archive also includes
+                // plain monitoring/wellness .fit snapshots that were
+                // never a real recorded activity - confirmed directly
+                // against a real export, tens of thousands of them).
+                var skipReasons = [];
+                if (job.unsupported) skipReasons.push(job.unsupported + ' unsupported file type');
+                if (job.empty) skipReasons.push(job.empty + ' with no usable activity data');
                 content.innerHTML =
                     '<p><strong>' + job.added + '</strong> newly imported, ' +
                     '<strong>' + job.updated + '</strong> updated, ' +
                     '<strong>' + job.unchanged + '</strong> unchanged, ' +
                     '<strong>' + job.skipped + '</strong> skipped' +
-                    (job.unsupported ? ' (' + job.unsupported + ' unsupported file type)' : '') + '.</p>';
+                    (skipReasons.length ? ' (' + skipReasons.join(', ') + ')' : '') + '.</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
                 content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';

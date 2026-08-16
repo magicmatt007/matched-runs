@@ -64,6 +64,16 @@ class Activity(Base):
     # different people's activities). Only ever populated for file-based
     # imports; live Strava sync already has the real ID in external_id.
     strava_activity_id = Column(String, nullable=True)
+    # Same idea, for a Garmin .fit bulk import: the real Garmin activity
+    # ID, backfilled by matching start time (see garmin_summarized.py)
+    # against DI-Connect-Fitness/*_summarizedActivities.json from a
+    # Garmin account export - deliberately NOT derived from the .fit
+    # file's own filename either, for the exact same reason as above
+    # (confirmed directly: that number 404s against Garmin's API even
+    # though it looks like a real activity ID). Only ever populated for
+    # file-based imports; live Garmin sync already has the real ID in
+    # external_id.
+    garmin_activity_id = Column(String, nullable=True)
 
     group_id = Column(Integer, ForeignKey("route_groups.id"), nullable=True)
     group = relationship("RouteGroup", back_populates="activities")
@@ -124,14 +134,16 @@ class Activity(Base):
         For live Garmin/Strava sync, external_id is already the numeric
         activity ID used directly in that service's own activity URLs.
 
-        For a file-based import, only strava_activity_id (backfilled from
-        the "Activity ID" column in Strava's own activities.csv, if that
-        was uploaded) is used. An earlier version of this tried treating a
-        purely-numeric filename as the activity ID directly, on the theory
-        that activities.csv's own Activity ID column couldn't be trusted -
-        that theory was wrong: confirmed via direct testing that the
-        filename-based guess produced links to other people's activities
-        entirely, while activities.csv's Activity ID column is correct.
+        For a file-based import, strava_activity_id (backfilled from the
+        "Activity ID" column in Strava's own activities.csv) or
+        garmin_activity_id (backfilled by matching start time against a
+        Garmin account export's summarized-activities JSON - see
+        garmin_summarized.py) is used instead. Earlier versions of both of
+        these tried treating a purely-numeric filename as the activity ID
+        directly - wrong both times, confirmed via direct testing/API
+        calls that the filename-based guess produces either someone else's
+        activity (Strava) or a 404 (Garmin), even though the number looks
+        just as plausible as the real ID.
         """
         if self.source == "garmin" and self.external_id:
             return f"https://connect.garmin.com/modern/activity/{self.external_id}"
@@ -139,6 +151,8 @@ class Activity(Base):
             return f"https://www.strava.com/activities/{self.external_id}"
         if self.strava_activity_id:
             return f"https://www.strava.com/activities/{self.strava_activity_id}"
+        if self.garmin_activity_id:
+            return f"https://connect.garmin.com/modern/activity/{self.garmin_activity_id}"
         return None
 
 
