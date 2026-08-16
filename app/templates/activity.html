@@ -27,7 +27,7 @@
         <div style="font-size: 1.1rem; font-weight: 700;">{{ activity.duration_s | hms }}</div>
     </div>
     <div class="panel" style="text-align: center; padding: 8px;">
-        <div class="muted">Pace</div>
+        <div class="muted">{% if is_cycling %}Speed{% else %}Pace{% endif %}</div>
         <div style="font-size: 1.1rem; font-weight: 700;">{{ activity | pace }}</div>
     </div>
 </div>

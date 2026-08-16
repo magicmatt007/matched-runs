@@ -12,7 +12,7 @@
 <div id="map" style="height: 480px;"></div>
 
 <div class="panel">
-    <h3 style="margin-top:0;">Pace over time</h3>
+    <h3 style="margin-top:0;">{% if group_is_cycling %}Speed over time{% else %}Pace over time{% endif %}</h3>
     <div id="pace-chart"></div>
 </div>
 
@@ -30,7 +30,7 @@
             <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "type", "Type", carry_params) }}</th>
             <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "distance", "Distance", carry_params) }}</th>
             <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "duration", "Duration", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "pace", "Pace", carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "pace", "Pace / Speed", carry_params) }}</th>
             <th>Source</th>
         </tr>
     </thead>
@@ -82,10 +82,16 @@ if (bounds.length) {
 <script>
 (function () {
     var points = {{ chart_points | tojson }};
+    // Cyclists conventionally think in speed (km/h), not pace - same
+    // reasoning as the activity detail page's own pace/speed chart and
+    // the "Pace / Speed" table column above. Converted from the same
+    // underlying pace_s_per_km each point already carries, rather than
+    // duplicating that computation server-side too.
+    var isCycling = {{ 'true' if group_is_cycling else 'false' }};
     var container = document.getElementById('pace-chart');
     if (!container) return;
     if (points.length === 0) {
-        container.innerHTML = '<p class="muted">Not enough data for a pace chart yet.</p>';
+        container.innerHTML = '<p class="muted">Not enough data for a ' + (isCycling ? 'speed' : 'pace') + ' chart yet.</p>';
         return;
     }
 
@@ -100,26 +106,39 @@ if (bounds.length) {
     var plotW = width - padding.left - padding.right;
     var plotH = height - padding.top - padding.bottom;
 
-    var paces = points.map(function (p) { return p.pace_s_per_km; });
-    var minPace = Math.min.apply(null, paces);
-    var maxPace = Math.max.apply(null, paces);
-    if (minPace === maxPace) { minPace -= 30; maxPace += 30; }
-    var pad = (maxPace - minPace) * 0.15;
-    minPace -= pad;
-    maxPace += pad;
+    function metricFor(p) {
+        // Higher speed = faster, unlike pace where LOWER is faster - kept
+        // as a conversion here (rather than a second server-side field)
+        // since pace_s_per_km is the one value every consumer of this
+        // chart data already needs regardless of activity type.
+        return isCycling ? (3600 / p.pace_s_per_km) : p.pace_s_per_km;
+    }
+
+    var values = points.map(metricFor);
+    var minV = Math.min.apply(null, values);
+    var maxV = Math.max.apply(null, values);
+    if (minV === maxV) { var slack = isCycling ? 2 : 30; minV -= slack; maxV += slack; }
+    var pad = (maxV - minV) * 0.15;
+    minV -= pad;
+    maxV += pad;
 
     function xFor(i) {
         if (points.length === 1) return padding.left + plotW / 2;
         return padding.left + (i / (points.length - 1)) * plotW;
     }
-    function yFor(pace) {
+    function yFor(v) {
+        if (isCycling) {
+            // Not inverted: higher speed = faster, so it sits higher.
+            return padding.top + plotH - ((v - minV) / (maxV - minV)) * plotH;
+        }
         // Inverted on purpose: a faster (lower seconds) pace sits higher on
         // the chart, matching the convention Strava's own pace chart uses.
-        return padding.top + ((pace - minPace) / (maxPace - minPace)) * plotH;
+        return padding.top + ((v - minV) / (maxV - minV)) * plotH;
     }
-    function formatPace(s) {
-        var m = Math.floor(s / 60);
-        var sec = Math.round(s % 60);
+    function formatValue(v) {
+        if (isCycling) return v.toFixed(1) + ' km/h';
+        var m = Math.floor(v / 60);
+        var sec = Math.round(v % 60);
         return m + ':' + String(sec).padStart(2, '0') + ' /km';
     }
 
@@ -127,18 +146,18 @@ if (bounds.length) {
 
     var tickCount = 4;
     for (var t = 0; t <= tickCount; t++) {
-        var pace = minPace + (t / tickCount) * (maxPace - minPace);
-        var y = yFor(pace);
+        var tickValue = minV + (t / tickCount) * (maxV - minV);
+        var y = yFor(tickValue);
         svg += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '" stroke="#2a2e38" stroke-width="1" />';
-        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="13" fill="#8b8f9a">' + formatPace(pace) + '</text>';
+        svg += '<text x="' + (padding.left - 8) + '" y="' + (y + 4) + '" text-anchor="end" font-size="13" fill="#8b8f9a">' + formatValue(tickValue) + '</text>';
     }
 
-    // A line connecting every single run's exact pace tends to look
+    // A line connecting every single run's exact pace/speed tends to look
     // jagged - run-to-run pace naturally varies a lot with conditions,
     // effort, terrain, etc., which drowns out whether the underlying
     // trend is actually improving or not. A centered moving average
     // smooths that out into a readable trend line, while the dots below
-    // still show each run's real, unsmoothed pace for hover/click-through.
+    // still show each run's real, unsmoothed value for hover/click-through.
     function movingAverage(values, windowSize) {
         var half = Math.floor(windowSize / 2);
         return values.map(function (_, i) {
@@ -149,19 +168,20 @@ if (bounds.length) {
         });
     }
 
-    var windowSize = Math.min(5, paces.length);
-    var smoothedPaces = movingAverage(paces, windowSize);
-    var linePoints = smoothedPaces.map(function (v, i) { return xFor(i) + ',' + yFor(v); }).join(' ');
+    var windowSize = Math.min(5, values.length);
+    var smoothedValues = movingAverage(values, windowSize);
+    var linePoints = smoothedValues.map(function (v, i) { return xFor(i) + ',' + yFor(v); }).join(' ');
     svg += '<polyline points="' + linePoints + '" fill="none" stroke="#fc5200" stroke-width="2" />';
 
     points.forEach(function (p, i) {
-        var x = xFor(i), y = yFor(p.pace_s_per_km);
+        var v = metricFor(p);
+        var x = xFor(i), y = yFor(v);
         var isLast = i === points.length - 1;
         var r = isLast ? 6 : 4;
         var fill = isLast ? '#fc5200' : '#1d212b';
         svg += '<a href="{{ base_path }}/activity/' + p.activity_id + '">' +
                '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + fill + '" stroke="#fc5200" stroke-width="2">' +
-               '<title>' + (window.matchedRunsFormatLocalDate ? window.matchedRunsFormatLocalDate(p.date_utc) : p.date_utc) + ' - ' + formatPace(p.pace_s_per_km) + '</title>' +
+               '<title>' + (window.matchedRunsFormatLocalDate ? window.matchedRunsFormatLocalDate(p.date_utc) : p.date_utc) + ' - ' + formatValue(v) + '</title>' +
                '</circle></a>';
     });
 

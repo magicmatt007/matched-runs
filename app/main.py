@@ -653,12 +653,21 @@ def format_duration_hms(seconds):
 
 
 def format_pace(activity):
-    """Pace in min:sec per km, e.g. '5:12 /km'."""
+    """Pace in min:sec per km, e.g. '5:12 /km' - or, for cycling, speed in
+    km/h (e.g. '24.3 km/h') instead, matching every other place in this
+    app that already treats cycling specially for this same reason (the
+    activity detail page's own pace/speed chart, _is_cycling_type's own
+    docstring): cyclists conventionally think in speed, not pace, and a
+    typical cycling pace (2-3 min/km) reads as a nonsensically fast running
+    pace to anyone glancing at it."""
     if not activity.duration_s or not activity.distance_m:
         return "-"
     distance_km = activity.distance_m / 1000.0
     if distance_km <= 0:
         return "-"
+    if _is_cycling_type(activity.activity_type):
+        speed_kmh = distance_km / (activity.duration_s / 3600.0)
+        return f"{speed_kmh:.1f} km/h"
     pace_seconds_per_km = activity.duration_s / distance_km
     m, s = divmod(int(round(pace_seconds_per_km)), 60)
     return f"{m}:{s:02d} /km"
@@ -1146,6 +1155,14 @@ def group_detail(group_id: int, request: Request, page: int = 1,
         }
         for a in chart_activities
     ]
+    # A route group is the same physical route done more than once - in
+    # practice that's virtually always the same activity type each time,
+    # but if it somehow isn't, default to pace (the more common case)
+    # rather than showing a misleading speed chart for a group that's
+    # only partly cycling.
+    group_is_cycling = bool(group.activities) and all(
+        _is_cycling_type(a.activity_type) for a in group.activities
+    )
 
     filters = {k: request.query_params.get(k, "") for k in FILTER_PARAM_KEYS}
     base_path = request.headers.get("X-Ingress-Path", "")
@@ -1166,6 +1183,7 @@ def group_detail(group_id: int, request: Request, page: int = 1,
         "filter_chips": filter_chips,
         "carry_params": build_carry_params(request, include_type=False),
         "chart_points": chart_points,
+        "group_is_cycling": group_is_cycling,
     })
 
 

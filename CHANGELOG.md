@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.17.9
+- Cycling activities now show speed (km/h) instead of pace (min/km)
+  everywhere pace was previously shown unconditionally: the main activity
+  list, a route group's activity table, the training log, and the
+  activity detail page's summary stat box (its chart already did this).
+  The "Pace" column header in those three tables is now "Pace / Speed",
+  since a single list can mix activity types. A route group's own "Pace
+  over time" trend chart (and heading) also switches to speed when every
+  activity in that group is cycling - the underlying fix is one shared
+  function (`format_pace`, used by every `| pace` template filter call),
+  so this applies everywhere consistently rather than needing separate
+  logic per page. Non-cycling activities are unaffected.
+
 ## 1.17.8
 - Fixed a paused .fit activity's duration being overstated by however
   long it was paused for. Garmin's .fit format records two separate
