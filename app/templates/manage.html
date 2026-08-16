@@ -129,16 +129,50 @@
             <button type="submit" class="secondary">Strip Garmin "V2" type suffixes</button>
         </form>
     </div>
-    <form action="{{ base_path }}/merge-legacy-types" method="post" class="row" style="margin-top: 10px;">
-        <label class="muted" for="cutoff_date">Merge legacy Hiking/Walking and Kayaking/Rowing types for activities before:</label>
-        <input type="date" name="cutoff_date" id="cutoff_date" value="2026-04-01">
-        <button type="submit" class="secondary">Merge legacy types</button>
+    {% if type_merge_result %}
+    <section class="panel" style="border-color: {% if type_merge_result.changed|int > 0 %}#3cb44b{% else %}#e6194b{% endif %}; margin-top: 10px;">
+        <h3 style="margin-top:0;">Merge activity types result</h3>
+        {% if type_merge_result.changed|int > 0 %}
+        <p><strong>{{ type_merge_result.changed }}</strong> activit{{ "y" if type_merge_result.changed|int == 1 else "ies" }}
+            relabeled from <strong>{{ type_merge_result.from_types }}</strong> to <strong>{{ type_merge_result.to_type }}</strong>.</p>
+        {% else %}
+        <p>No activities matched <strong>{{ type_merge_result.from_types }}</strong> - nothing was changed.</p>
+        {% endif %}
+    </section>
+    {% endif %}
+    <form action="{{ base_path }}/merge-activity-types" method="post" id="merge-types-form" style="margin-top: 10px;">
+        <label class="muted">Merge these types:</label>
+        <div class="row" style="gap: 4px 14px; margin: 6px 0;">
+            {% for t in activity_types %}
+            <label class="row" style="gap: 4px; font-weight: normal;">
+                <input type="checkbox" name="from_types" value="{{ t.name }}"> {{ t.name }} ({{ t.count }})
+            </label>
+            {% endfor %}
+        </div>
+        <div class="row">
+            <label class="muted" for="to_type">into:</label>
+            <input type="text" name="to_type" id="to_type" list="activity-type-options" placeholder="e.g. Hiking" required>
+            <datalist id="activity-type-options">
+                {% for t in activity_types %}
+                <option value="{{ t.name }}">
+                {% endfor %}
+            </datalist>
+        </div>
+        <div class="row" style="margin-top: 6px;">
+            <label class="row" style="gap: 4px; font-weight: normal;">
+                <input type="checkbox" id="cutoff_enabled"> Only activities before:
+            </label>
+            <input type="date" name="cutoff_date" id="cutoff_date" value="2026-04-01" disabled>
+        </div>
+        <button type="submit" class="secondary" style="margin-top: 6px;">Merge activity types</button>
     </form>
-    <p class="muted" style="margin-top: 4px;">Useful if an old watch only
-        offered a limited choice of activity types, so the same real activity
-        got logged under different labels depending on which watch was in
-        use at the time. Only activities before the date you pick are
-        touched; anything after is left as-is.</p>
+    <p class="muted" style="margin-top: 4px;">Useful if the same real
+        activity ended up logged under different type labels - e.g. an old
+        watch only offering a limited choice of types, so the same kind of
+        outing was "Walking" one year and "Hiking" another. Pick any number
+        of existing types above, and a destination type to relabel them all
+        to (an existing one, or type a new name). Optionally restrict this
+        to activities before a given date, leaving anything after as-is.</p>
 
     <form action="{{ base_path }}/rename-activities" method="post" class="row" style="margin-top: 10px;"
           data-confirm="This renames EVERY activity to '[City] [Activity Type]' (e.g. 'Zurich Running'), overwriting current names. Continue?">
@@ -523,6 +557,30 @@
         if (initialJob && initialJob.active) {
             pollTimer = setInterval(poll, 1000);
         }
+    })();
+
+    // --- Merge activity types form ---
+    (function () {
+        var form = document.getElementById('merge-types-form');
+        if (!form) return;
+        var cutoffEnabled = document.getElementById('cutoff_enabled');
+        var cutoffDate = document.getElementById('cutoff_date');
+
+        // A disabled input isn't included in the form submission at all,
+        // which is exactly what "no date restriction" should mean server-
+        // side - so this checkbox needs no name/value of its own, just
+        // toggling whether cutoff_date is enabled.
+        cutoffEnabled.addEventListener('change', function () {
+            cutoffDate.disabled = !cutoffEnabled.checked;
+        });
+
+        form.addEventListener('submit', function (e) {
+            var anyChecked = form.querySelectorAll('input[name="from_types"]:checked').length > 0;
+            if (!anyChecked) {
+                e.preventDefault();
+                window.alert('Pick at least one type to merge from.');
+            }
+        });
     })();
 
     // --- Rename-by-city progress ---

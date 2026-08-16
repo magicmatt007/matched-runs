@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.17.5
+- Replaced the hardcoded "Merge legacy types" action (which only knew two
+  fixed pairs: Hiking/Walking and Kayaking/Rowing) with a fully
+  customizable "Merge activity types" form - checkboxes for every type
+  actually present in your data (with its activity count), merged into
+  any destination type you type or pick (existing or new). The date
+  cutoff is still available but now optional, via its own checkbox.
+  Also adds a clear result panel after submitting ("4 activities
+  relabeled from Training, Other to Cross training" / "No activities
+  matched X - nothing was changed") - the old flow gave no feedback
+  specific to the merge at all.
+  - Verified against the real running app: the checkbox/count list
+    renders correctly from real data, HTML5 validation blocks an empty
+    destination, the cutoff-date checkbox correctly enables/disables the
+    date field, and both the success and no-op feedback panels render
+    correctly. The route's filtering/redirect logic was exercised via a
+    harmless self-merge (a type merged into itself, which correctly
+    no-ops) rather than a real merge on live data.
+
 ## 1.17.4
 - The activity detail page's Elevation, Pace/Speed, and Heart Rate charts
   can now switch their x-axis between distance and elapsed time via a

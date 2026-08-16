@@ -25,7 +25,7 @@ from app.fit_parser import parse_fit_bytes
 from app.tcx_parser import parse_tcx_bytes
 from app.matcher import resample_track, rebuild_groups, incremental_rebuild_groups, find_cross_source_duplicate, merge_duplicate_activities, SOURCE_PRIORITY, haversine
 from app.polyline_util import decode_polyline
-from app.type_normalize import normalize_activity_type, merge_legacy_type
+from app.type_normalize import normalize_activity_type
 from app.strava_csv import parse_strava_activities_csv
 from app import strava_client
 from app import garmin_client
@@ -500,12 +500,37 @@ def manage_page(request: Request, db: Session = Depends(get_db)):
             "unsupported": request.query_params.get("unsupported", "0"),
         }
 
+    type_merge_result = None
+    if "type_merge_changed" in request.query_params:
+        type_merge_result = {
+            "changed": request.query_params.get("type_merge_changed", "0"),
+            "from_types": request.query_params.get("type_merge_from", ""),
+            "to_type": request.query_params.get("type_merge_to", ""),
+        }
+
+    # Every distinct type currently in use, with how many activities carry
+    # it - powers the "Merge activity types" form's checkbox list below,
+    # so it always reflects whatever mix of types this user's own data
+    # actually has instead of a fixed guess at what needs merging.
+    activity_types = [
+        {"name": t, "count": c}
+        for t, c in (
+            db.query(Activity.activity_type, func.count(Activity.id))
+            .group_by(Activity.activity_type)
+            .order_by(Activity.activity_type)
+            .all()
+        )
+        if t
+    ]
+
     return templates.TemplateResponse("manage.html", {
         "request": request,
         "total_activities": total_activities,
         "strava_connected": strava_connected,
         "strava_configured": strava_client.is_configured(),
         "upload_result": upload_result,
+        "type_merge_result": type_merge_result,
+        "activity_types": activity_types,
         "garmin_configured": garmin_client.is_configured(),
         "garmin_has_session": garmin_client.has_saved_session(),
         "garmin_sync_interval": GARMIN_SYNC_INTERVAL_MINUTES,
@@ -1380,38 +1405,68 @@ def normalize_types_route(request: Request, db: Session = Depends(get_db)):
     return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
 
 
-DEFAULT_LEGACY_TYPE_CUTOFF = "2026-04-01"
+@app.post("/merge-activity-types")
+def merge_activity_types_route(request: Request, from_types: list[str] = Form(...),
+                                to_type: str = Form(...), cutoff_date: str = Form(""),
+                                db: Session = Depends(get_db)):
+    """Relabels every activity currently tagged with one of `from_types` to
+    `to_type` - e.g. merging "Walking" and "Hiking" into one canonical
+    "Hiking" because an old watch only offered a limited choice of types,
+    or any other combination someone's own data needs. Both sides are
+    picked freely in the "Merge activity types" form (manage.html) from
+    whatever types actually exist, rather than a fixed set of hardcoded
+    pairs. `cutoff_date`, if given, scopes the merge to activities that
+    started before that date, same as the old hardcoded legacy-type merge
+    this replaces."""
+    to_type = to_type.strip()
+    checked_types = sorted({t.strip() for t in from_types if t.strip()})
 
-
-@app.post("/merge-legacy-types")
-def merge_legacy_types_route(request: Request, cutoff_date: str = Form(DEFAULT_LEGACY_TYPE_CUTOFF),
-                              db: Session = Depends(get_db)):
-    try:
-        cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
-    except ValueError:
+    if not to_type or not checked_types:
         return HTMLResponse(
-            f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p>"
-            f"<p><a href='{ingress_prefix(request)}/'>back</a></p>",
+            "<p>Pick at least one type to merge from, and a destination type.</p>"
+            f"<p><a href='{ingress_prefix(request)}/manage'>back</a></p>",
             status_code=400,
         )
 
-    changed = 0
-    activities = (
-        db.query(Activity)
-        .filter(Activity.start_time.isnot(None))
-        .filter(Activity.start_time < cutoff_dt)
-        .all()
-    )
+    # A type checked as both source and destination would be a silent
+    # no-op for that one type anyway - dropped here so the "N activities
+    # updated" count below only reflects types that actually changed. If
+    # that was the ONLY type checked, this naturally falls through to the
+    # "no activities matched" branch below rather than a dead-end error,
+    # since checked_types (used for the feedback message) still has it.
+    from_types = [t for t in checked_types if t != to_type]
+
+    cutoff_dt = None
+    if cutoff_date:
+        try:
+            cutoff_dt = datetime.strptime(cutoff_date, "%Y-%m-%d")
+        except ValueError:
+            return HTMLResponse(
+                f"<p>Invalid date: {cutoff_date!r} (expected YYYY-MM-DD)</p>"
+                f"<p><a href='{ingress_prefix(request)}/manage'>back</a></p>",
+                status_code=400,
+            )
+
+    query = db.query(Activity).filter(Activity.activity_type.in_(from_types))
+    if cutoff_dt is not None:
+        query = query.filter(Activity.start_time.isnot(None)).filter(Activity.start_time < cutoff_dt)
+
+    activities = query.all()
     for act in activities:
-        new_type = merge_legacy_type(act.activity_type)
-        if new_type != act.activity_type:
-            act.activity_type = new_type
-            changed += 1
+        act.activity_type = to_type
+    changed = len(activities)
     if changed:
         db.commit()
         rebuild_groups(db)  # merged types can change which activities group together
-    logger.info("Legacy type merge (activities before %s): %d activities updated", cutoff_date, changed)
-    return local_redirect(request, f"/manage?imported=0&updated={changed}&skipped=0&duplicates=0&unsupported=0")
+    logger.info("Activity type merge (%s -> %s%s): %d activities updated",
+                ", ".join(checked_types), to_type, f", before {cutoff_date}" if cutoff_date else "", changed)
+
+    query_string = urlencode({
+        "type_merge_changed": changed,
+        "type_merge_from": ", ".join(checked_types),
+        "type_merge_to": to_type,
+    })
+    return local_redirect(request, f"/manage?{query_string}")
 
 
 @app.post("/dedupe")
