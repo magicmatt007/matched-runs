@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.17.8
+- Fixed a paused .fit activity's duration being overstated by however
+  long it was paused for. Garmin's .fit format records two separate
+  fields - total_elapsed_time (wall-clock from start to stop, including
+  any paused period) and total_timer_time (actual recording/moving time,
+  excluding pauses) - and the parser was using the former. Live Garmin/
+  Strava sync were unaffected (their APIs already report the timer-time
+  equivalent), which is why the same route's duration looked wildly
+  inconsistent depending on which import path an activity came through.
+  Now uses total_timer_time, falling back to total_elapsed_time only if
+  a device/firmware omits it.
+  - The activity detail page's charts had the same problem one level
+    deeper: even after the summary duration was fixed, the "Time" x-axis
+    still stretched out to the pause-inflated wall-clock length, since
+    per-point elapsed time was computed from raw GPS-point timestamps
+    (which genuinely span the paused gap). Now uses the .fit file's own
+    "timer" event messages (which mark every pause/resume with a real
+    timestamp - including Garmin's "Auto Pause" at stoplights, not just
+    manual pauses) to subtract paused periods from each point's elapsed
+    time too, so the chart's end lines up with the corrected duration.
+  - Also fixed a re-upload never being able to correct an already-stored
+    wrong duration_s at all (only distance_m had this explicit re-check
+    on an existing activity, not duration_s) - otherwise this fix
+    couldn't apply to activities already imported before it existed.
+  - Verified against a real paused ride: duration dropped from 5h55m to
+    4h55m (matching total_timer_time to the second), the "Time" chart's
+    last point now lines up with that corrected duration, and comparing
+    the same ~93km route across four rides (two live-synced, two file-
+    imported) now shows consistent durations (4h36m-5h06m) instead of the
+    file-imported ones being inflated by up to an hour. Re-ran the full
+    import against the real export to backfill every already-imported
+    activity (1106 updated, 0 added - no duplicates).
+
 ## 1.17.7
 - Fixed two problems specific to importing a Garmin "Export Your Data"
   account archive (1.17.6 made the import itself work; these are about

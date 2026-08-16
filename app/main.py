@@ -553,14 +553,22 @@ def _save_activity(db: Session, source: str, external_id: str, name: str,
         if name and existing.name != name:
             existing.name = name
             changed = True
-        # distance_m is handled explicitly here (not via extra_fields,
-        # unlike the other simple fields below) because it's ALSO passed
-        # explicitly to Activity() further down in the new-activity branch
-        # - adding it to extra_fields as well caused Python to raise
-        # "got multiple values for keyword argument 'distance_m'" there,
-        # since **extra_fields would then supply it a second time.
+        # distance_m/duration_s are handled explicitly here (not via
+        # extra_fields, unlike the other simple fields below) because both
+        # are ALSO passed explicitly to Activity() further down in the
+        # new-activity branch - adding them to extra_fields as well caused
+        # Python to raise "got multiple values for keyword argument..."
+        # there, since **extra_fields would then supply each a second
+        # time. duration_s missing this same explicit re-check used to
+        # mean a re-uploaded file could never correct an already-stored
+        # wrong duration (confirmed in practice: a fix to how .fit
+        # duration itself gets computed - see fit_parser.py - silently
+        # failed to apply on re-upload until this was added too).
         if existing.distance_m != distance_m:
             existing.distance_m = distance_m
+            changed = True
+        if duration_s is not None and existing.duration_s != duration_s:
+            existing.duration_s = duration_s
             changed = True
         for field, value in extra_fields.items():
             if value is not None and getattr(existing, field) != value:
