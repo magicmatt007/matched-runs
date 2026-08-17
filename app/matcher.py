@@ -13,6 +13,27 @@ Approach (similar in spirit to what Strava does for "matched runs"):
      run in reverse).
 3. Matches are transitive-grouped via union-find, so all activities on the
    same route end up in one RouteGroup, exactly like Strava's grouping.
+
+The point-deviation threshold in step 2 is `max(MATCH_DISTANCE_THRESHOLD_M,
+route_length * MATCH_DISTANCE_TOLERANCE)` - a flat floor PLUS a component
+that scales with route length, not a single flat number. A long route
+naturally accumulates more absolute GPS/riding-line deviation between two
+otherwise-identical recordings than a short one does (more turns, more GPS
+noise exposure, more real minor route choices like which side of a wide
+road) - confirmed directly against real data: a flat threshold loose
+enough to reliably match a ~94km ride's repeats (needed ~500m in practice)
+was, at that same absolute value, loose enough to risk merging genuinely
+different short routes that happen to start nearby (500m is already 17%
+of a 3km loop). The 40 resampled points are spaced further apart in
+absolute terms for a longer route too (roughly route_length / 39), which
+is the same underlying reason a fixed-count resampling needs a
+length-aware comparison threshold to remain equally strict at every
+scale. Verified directly against a real ~94km route matched at four
+different times (genuine same-route deviation: 0.18%-0.43% of route
+length) against six different real short/medium/long route *pairs* that
+must NOT match (2.9%-1392% of route length, at least 5x this fix's
+default margin above the wanted case) - see CHANGELOG.md for the exact
+numbers.
 """
 import math
 import os
@@ -23,6 +44,7 @@ from app.models import Activity, RouteGroup
 RESAMPLE_POINTS = 40
 
 MATCH_DISTANCE_THRESHOLD_M = float(os.environ.get("MATCH_DISTANCE_THRESHOLD_M", 85))
+MATCH_DISTANCE_TOLERANCE = float(os.environ.get("MATCH_DISTANCE_TOLERANCE", 0.006))
 MATCH_LENGTH_TOLERANCE = float(os.environ.get("MATCH_LENGTH_TOLERANCE", 0.15))
 
 # When the same real-world activity gets imported from more than one source
@@ -94,7 +116,12 @@ def tracks_match(a_resampled, a_len, b_resampled, b_len):
     forward = _mean_deviation(a_resampled, b_resampled)
     reverse = _mean_deviation(a_resampled, list(reversed(b_resampled)))
     best = min(forward, reverse)
-    return best <= MATCH_DISTANCE_THRESHOLD_M
+    # A flat floor (MATCH_DISTANCE_THRESHOLD_M) PLUS a component that
+    # scales with route length - see this module's docstring for why a
+    # single flat number can't be both strict enough for a short loop and
+    # loose enough for a long ride at the same time.
+    effective_threshold = max(MATCH_DISTANCE_THRESHOLD_M, max(a_len, b_len) * MATCH_DISTANCE_TOLERANCE)
+    return best <= effective_threshold
 
 
 class UnionFind:
