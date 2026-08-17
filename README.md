@@ -123,10 +123,16 @@ All data (SQLite DB) is stored in `./data`, so it persists across restarts.
 
 ## Notes / things you may want to tune
 
-- `MATCH_DISTANCE_THRESHOLD_M` and `MATCH_LENGTH_TOLERANCE` in `.env`
-  control how strict matching is. Loosen them if similar-but-not-identical
-  routes (e.g. a route with a couple of small variations) aren't matching;
-  tighten them if unrelated routes are getting grouped.
+- `MATCH_DISTANCE_THRESHOLD_M`, `MATCH_DISTANCE_TOLERANCE`, and
+  `MATCH_LENGTH_TOLERANCE` in `.env` control how strict matching is. The
+  distance allowance is whichever is larger: the flat
+  `MATCH_DISTANCE_THRESHOLD_M` (meters), or the route's own length times
+  `MATCH_DISTANCE_TOLERANCE` - so a long ride automatically gets more
+  absolute GPS-deviation leeway than a short loop does, without loosening
+  matching for short routes too. Loosen these if similar-but-not-identical
+  routes (e.g. a route with a couple of small variations, or a long ride
+  that doesn't match its own repeats reliably) aren't matching; tighten
+  them if unrelated routes are getting grouped.
 - The homepage has cleanup buttons for data that predates a given feature:
   **"Recompute matches"** re-runs route grouping from scratch;
   **"Merge duplicate activities"** folds the same real activity imported
@@ -134,12 +140,12 @@ All data (SQLite DB) is stored in `./data`, so it persists across restarts.
   whichever source has richer metadata; **"Strip Garmin 'V2' type
   suffixes"** removes Garmin's internal activity-type version suffixes
   (e.g. "Kayaking V2" → "Kayaking"), which also happens automatically on
-  every future import. Separately, **"Merge legacy types"** merges
-  Hiking/Walking into "Hiking" and Kayaking/Rowing into "Kayaking" for
-  activities before a date you choose - this is deliberately manual and
-  date-scoped rather than automatic, since it reflects which watch you were
-  using at the time (older devices offering a more limited choice of
-  activity types), not which service the activity was imported through.
+  every future import. Separately, **"Merge activity types"** lets you
+  pick any number of existing types and relabel them all to one
+  destination type (existing or new) - useful e.g. if an old watch only
+  offered a limited choice of activity types, so the same real activity
+  got logged under different labels depending on which watch was in use
+  at the time.
 - Uploading Strava's `activities.csv` (included in its full account export,
   alongside the `activities/` folder) recovers your real activity titles
   for anything that came from a raw GPX/FIT/TCX file - this works even if

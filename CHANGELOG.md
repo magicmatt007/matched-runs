@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.17.13
+- Route matching now scales its distance-deviation allowance with route
+  length, instead of a single flat threshold for every route regardless
+  of size. Reported as: a flat MATCH_DISTANCE_THRESHOLD_M loose enough to
+  reliably match repeats of a long (~94km) bike ride (needed ~500m in
+  practice, vs the 85m default) was, at that same value, loose enough to
+  risk merging genuinely different shorter routes that shouldn't be
+  grouped together.
+  - Root cause: every track is resampled to a fixed 40 points regardless
+    of length, so a longer route naturally accumulates more absolute
+    GPS/riding-line deviation between two otherwise-identical recordings
+    than a short one does (more turns, more GPS noise exposure, more real
+    minor route choices) - a flat threshold can't be both strict enough
+    for a short loop and loose enough for a long ride at the same time.
+  - Fix: the effective threshold is now `max(MATCH_DISTANCE_THRESHOLD_M,
+    route_length * MATCH_DISTANCE_TOLERANCE)` - the existing flat floor
+    (unchanged, so short routes are unaffected) plus a new proportional
+    component (new MATCH_DISTANCE_TOLERANCE setting, default 0.6% of
+    route length) that only matters past ~14km at the defaults.
+  - Verified against real data: calibrated the 0.6% default directly
+    against a real ~94km route (genuine same-route deviation measured at
+    0.18%-0.43% across 4 repeats) and against six different real route
+    pairs that must NOT match (2.9%-1392% of route length - at least 5x
+    margin above the wanted case, including two same-city, similar-length
+    routes specifically chosen to stress-test false positives). Then
+    reset the flat threshold back to its true default (85m, down from
+    the 500m manual workaround) and re-ran "Recompute matches" for real:
+    confirmed all 4 long rides still group together, and route groups
+    dropped from 121 to 112 (1444 to 1116 grouped activities) - shorter
+    routes that the 500m workaround had been over-merging correctly split
+    back apart.
+
 ## 1.17.12
 - Sped up "Rename all activities by city" by geocoding once per route
   group instead of once per activity. Activities already matched into

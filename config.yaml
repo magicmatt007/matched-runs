@@ -1,5 +1,5 @@
 name: "Matched Runs"
-version: "1.17.12"
+version: "1.17.13"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -
@@ -39,6 +39,7 @@ webui: "http://[HOST]:[PORT:8000]/"
 options:
   garmin_sync_interval_minutes: 60
   match_distance_threshold_m: 85
+  match_distance_tolerance: 0.006
   match_length_tolerance: 0.15
 schema:
   garmin_email: "str?"
@@ -48,4 +49,5 @@ schema:
   strava_client_secret: "str?"
   strava_redirect_uri: "url?"
   match_distance_threshold_m: "int"
+  match_distance_tolerance: "float"
   match_length_tolerance: "float"
