@@ -7,55 +7,55 @@
 {% endif %}
 
 <button type="button" class="filter-toggle secondary" id="filter-toggle" aria-expanded="true" aria-controls="filter-panel">
-    Filters{% if filter_chips %} ({{ filter_chips|length }}){% endif %} <span id="filter-toggle-caret" aria-hidden="true">&#9662;</span>
+    {{ t(request, "filters.filters") }}{% if filter_chips %} ({{ filter_chips|length }}){% endif %} <span id="filter-toggle-caret" aria-hidden="true">&#9662;</span>
 </button>
 
 <form method="get" action="{{ filter_form_action }}" class="row filters filter-panel" id="filter-panel" style="margin: 12px 0; flex-wrap: wrap;">
     {% if types is defined %}
     <div class="filter-group">
-        <label for="type">Type</label>
+        <label for="type">{{ t(request, "activities.col_type") }}</label>
         <select name="type" id="type">
-            <option value="" {% if not selected_type %}selected{% endif %}>All</option>
-            {% for t in types %}
-            <option value="{{ t }}" {% if t == selected_type %}selected{% endif %}>{{ t }}</option>
+            <option value="" {% if not selected_type %}selected{% endif %}>{{ t(request, "filters.all") }}</option>
+            {% for t_opt in types %}
+            <option value="{{ t_opt }}" {% if t_opt == selected_type %}selected{% endif %}>{{ t_opt }}</option>
             {% endfor %}
         </select>
     </div>
     {% endif %}
     <div class="filter-group">
-        <label for="name_filter">Name contains</label>
+        <label for="name_filter">{{ t(request, "filters.name_contains") }}</label>
         <input type="text" name="name_filter" id="name_filter" value="{{ filters.name_filter }}" placeholder="e.g. Urdorf">
     </div>
     <div class="filter-group">
-        <label for="date_from">From</label>
+        <label for="date_from">{{ t(request, "filters.from") }}</label>
         <input type="date" name="date_from" id="date_from" value="{{ filters.date_from }}">
-        <label for="date_to">To</label>
+        <label for="date_to">{{ t(request, "filters.to") }}</label>
         <input type="date" name="date_to" id="date_to" value="{{ filters.date_to }}">
     </div>
     <div class="filter-group">
-        <label for="distance_min">Distance km</label>
-        <input type="number" step="0.1" min="0" name="distance_min" id="distance_min" value="{{ filters.distance_min }}" placeholder="min" style="width: 70px;">
+        <label for="distance_min">{{ t(request, "filters.distance_km") }}</label>
+        <input type="number" step="0.1" min="0" name="distance_min" id="distance_min" value="{{ filters.distance_min }}" placeholder="{{ t(request, 'filters.min') }}" style="width: 70px;">
         &ndash;
-        <input type="number" step="0.1" min="0" name="distance_max" value="{{ filters.distance_max }}" placeholder="max" style="width: 70px;">
+        <input type="number" step="0.1" min="0" name="distance_max" value="{{ filters.distance_max }}" placeholder="{{ t(request, 'filters.max') }}" style="width: 70px;">
     </div>
     <div class="filter-group">
-        <label for="duration_min">Duration min</label>
-        <input type="number" step="1" min="0" name="duration_min" id="duration_min" value="{{ filters.duration_min }}" placeholder="min" style="width: 70px;">
+        <label for="duration_min">{{ t(request, "filters.duration_min_label") }}</label>
+        <input type="number" step="1" min="0" name="duration_min" id="duration_min" value="{{ filters.duration_min }}" placeholder="{{ t(request, 'filters.min') }}" style="width: 70px;">
         &ndash;
-        <input type="number" step="1" min="0" name="duration_max" value="{{ filters.duration_max }}" placeholder="max" style="width: 70px;">
+        <input type="number" step="1" min="0" name="duration_max" value="{{ filters.duration_max }}" placeholder="{{ t(request, 'filters.max') }}" style="width: 70px;">
     </div>
     <div class="filter-group">
-        <label for="pace_min">Pace min/km</label>
-        <input type="number" step="0.1" min="0" name="pace_min" id="pace_min" value="{{ filters.pace_min }}" placeholder="min" style="width: 70px;">
+        <label for="pace_min">{{ t(request, "filters.pace_min_label") }}</label>
+        <input type="number" step="0.1" min="0" name="pace_min" id="pace_min" value="{{ filters.pace_min }}" placeholder="{{ t(request, 'filters.min') }}" style="width: 70px;">
         &ndash;
-        <input type="number" step="0.1" min="0" name="pace_max" value="{{ filters.pace_max }}" placeholder="max" style="width: 70px;">
+        <input type="number" step="0.1" min="0" name="pace_max" value="{{ filters.pace_max }}" placeholder="{{ t(request, 'filters.max') }}" style="width: 70px;">
     </div>
     <input type="hidden" name="page_size" value="{{ page_size }}">
     {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
     {% if dir %}<input type="hidden" name="dir" value="{{ dir }}">{% endif %}
-    <button type="submit">Apply filters</button>
+    <button type="submit">{{ t(request, "filters.apply") }}</button>
     {% if filter_chips %}
-    <a class="button secondary" href="{{ filter_form_action }}">Clear all filters</a>
+    <a class="button secondary" href="{{ filter_form_action }}">{{ t(request, "filters.clear_all") }}</a>
     {% endif %}
 </form>
 

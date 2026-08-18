@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
-{% from "_pagination.html" import pagination_controls %}
+{% from "_pagination.html" import pagination_controls with context %}
 {% from "_table_controls.html" import sort_link, activity_context_query %}
 {% block title %}{{ group.name }}{% endblock %}
 {% block content %}
 
-<a href="{{ base_path }}/">&larr; back</a>
+<a href="{{ base_path }}/">&larr; {{ t(request, "common.back") }}</a>
 <h2>{{ group.name }}</h2>
-<p class="muted">{{ group.activities|length }} matched runs</p>
+<p class="muted">{{ t(request, "group.matched_runs_count", count=group.activities|length) }}</p>
 
 <div id="map" style="height: 480px;"></div>
 
 <div class="panel">
-    <h3 style="margin-top:0;">{% if group_is_cycling %}Speed over time{% else %}Pace over time{% endif %}</h3>
+    <h3 style="margin-top:0;">{% if group_is_cycling %}{{ t(request, "group.speed_over_time") }}{% else %}{{ t(request, "group.pace_over_time") }}{% endif %}</h3>
     <div id="pace-chart"></div>
 </div>
 
@@ -25,13 +25,13 @@
 <table class="table">
     <thead>
         <tr>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "date", "Date", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "name", "Name", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "type", "Type", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "distance", "Distance", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "duration", "Duration", carry_params) }}</th>
-            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "pace", "Pace / Speed", carry_params) }}</th>
-            <th>Source</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "date", t(request, "activities.col_date"), carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "name", t(request, "activities.col_name"), carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "type", t(request, "activities.col_type"), carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "distance", t(request, "activities.col_distance"), carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "duration", t(request, "activities.col_duration"), carry_params) }}</th>
+            <th>{{ sort_link(base_path ~ "/group/" ~ group.id, sort, dir, "pace", t(request, "activities.col_pace"), carry_params) }}</th>
+            <th>{{ t(request, "group.source") }}</th>
         </tr>
     </thead>
     <tbody>
@@ -88,10 +88,14 @@ if (bounds.length) {
     // underlying pace_s_per_km each point already carries, rather than
     // duplicating that computation server-side too.
     var isCycling = {{ 'true' if group_is_cycling else 'false' }};
+    // Pre-translated server-side (rather than assembled by concatenating a
+    // translated fragment into an English sentence shape) since word order
+    // around "speed"/"pace" isn't guaranteed to match in every language.
+    var noDataMessage = isCycling ? {{ t(request, "group.no_speed_data") | tojson }} : {{ t(request, "group.no_pace_data") | tojson }};
     var container = document.getElementById('pace-chart');
     if (!container) return;
     if (points.length === 0) {
-        container.innerHTML = '<p class="muted">Not enough data for a ' + (isCycling ? 'speed' : 'pace') + ' chart yet.</p>';
+        container.innerHTML = '<p class="muted">' + noDataMessage + '</p>';
         return;
     }
 

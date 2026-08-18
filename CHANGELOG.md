@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.17.15
+- Completed the i18n extraction sweep started in 1.17.14 - no visible
+  change yet (only English exists), but every page's UI copy now flows
+  through `t()` instead of being hardcoded:
+  - All 11 templates converted: static Jinja-rendered text (headings,
+    buttons, table headers, form labels, the long ingress/upload-limit
+    explainer paragraphs), and the JS-rendered text too (chart labels/
+    tooltips, and `manage.html`'s progress-bar poll loops) via a small
+    per-page `I18N` object built server-side and a `fmt()`
+    `{placeholder}` substitution helper, rather than assembling
+    translated fragments into an English sentence shape.
+  - Python-side user-facing strings this app controls (the five
+    "a job is already running" 409 responses, the DB-import validation
+    errors, the Strava OAuth error pages) now go through `t()` too.
+    Background-job worker threads have no request to resolve a locale
+    from, so they store an `error_key` instead of a rendered string; the
+    `/manage/*-status` polling endpoint (which does have a request)
+    translates it at serve time - see `_job_status_response()` in
+    `app/main.py`. Raw exception text from third-party
+    libraries/SQLite/the filesystem is deliberately left untranslated,
+    same as log-only skip reasons during import.
+  - Fixed a real bug surfaced by actually rendering every page during
+    verification: `_pagination.html`'s macro called `t(request, ...)`
+    but macros don't inherit the caller's template context in Jinja by
+    default, so `request` was undefined - fixed via `with context` on
+    both `{% from "_pagination.html" import ... %}` call sites.
+  - Verified end-to-end against the running app: every page loads clean,
+    every inline `<script>` block is syntax-valid, and both the
+    error-key-translation and job-conflict-409 code paths were exercised
+    for real (an invalid-SQLite upload, and two racing "Recompute
+    matches" requests).
+
+## 1.17.14
+- Added the foundation for internationalized UI text - no visible change
+  yet (only English exists), but the plumbing is now in place and proven
+  on the nav bar and the activities list:
+  - `app/i18n.py`: per-request locale resolution from `Accept-Language`
+    (with an optional `LOCALE` env override, same pattern as the rest of
+    this app's config), plus a `t(request, "section.key", count=...)`
+    lookup with per-key English fallback and CLDR one/other pluralization.
+  - `app/translations/en.json`: the canonical string set, in the
+    "i18next JSON" nested/pluralized shape specifically so it can be fed
+    to a self-hosted Weblate instance later without a format change.
+  - `scripts/check_translations.py` (+ CI step): validates the JSON and
+    flags any non-English key with no matching `en.json` key.
+  - Templates call `{{ t(request, "...") }}` / `{{ locale(request) }}`
+    directly (registered as Jinja globals), mirroring the existing
+    per-template `X-Ingress-Path` pattern - no route handler changes
+    needed to add a translated string to a page.
+  - Remaining templates/Python-side strings are intentionally not
+    converted yet; this establishes the pattern before the full sweep.
+
 ## 1.17.13
 - Route matching now scales its distance-deviation allowance with route
   length, instead of a single flat threshold for every route regardless
