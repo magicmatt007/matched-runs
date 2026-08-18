@@ -1,0 +1,20 @@
+{
+  "nav": {
+    "routes": "Matched Routes",
+    "log": "Training Log",
+    "manage": "Import & Sync"
+  },
+  "activities": {
+    "heading": "All activities",
+    "col_date": "Date",
+    "col_name": "Name",
+    "col_type": "Type",
+    "col_distance": "Distance",
+    "col_duration": "Duration",
+    "col_pace": "Pace / Speed",
+    "col_matched_route": "Matched route",
+    "no_match": "no match",
+    "matched_runs_count_one": "{count} run",
+    "matched_runs_count_other": "{count} runs"
+  }
+}

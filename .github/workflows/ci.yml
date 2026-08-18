@@ -47,6 +47,9 @@ jobs:
       - name: Template syntax check
         run: python scripts/check_templates.py
 
+      - name: Translation file consistency check
+        run: python scripts/check_translations.py
+
       - name: Import sanity check (catches missing deps / import-time errors)
         run: python -c "import app.main"
 

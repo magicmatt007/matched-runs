@@ -32,6 +32,7 @@ from app.strava_csv import parse_strava_activities_csv
 from app.garmin_summarized import parse_summarized_activities as parse_garmin_summarized_activities, build_start_time_index, match_by_start_time
 from app import strava_client
 from app import garmin_client
+from app import i18n
 
 logger = logging.getLogger("matched_runs")
 logging.basicConfig(
@@ -702,6 +703,15 @@ def format_pace(activity):
 
 templates.env.filters["hms"] = format_duration_hms
 templates.env.filters["pace"] = format_pace
+
+# Registered as globals (not filters) since both take `request` explicitly
+# rather than a piped value - see app/i18n.py. Templates call
+# {{ t(request, "section.key") }} / {{ locale(request) }}, mirroring the
+# existing per-template `request.headers.get('X-Ingress-Path', ...)`
+# pattern instead of threading translated strings through every route
+# handler's context dict.
+templates.env.globals["t"] = i18n.t
+templates.env.globals["locale"] = i18n.resolve_locale
 
 
 def _group_activity_counts(db: Session, group_ids=None):
