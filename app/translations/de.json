@@ -9,7 +9,7 @@
         "col_type": "Typ",
         "col_distance": "Distanz",
         "col_duration": "Dauer",
-        "col_pace": "Tempo / Geschwindigkeit"
+        "col_pace": "Tempo"
     },
     "pagination": {
         "first": "Erste",
