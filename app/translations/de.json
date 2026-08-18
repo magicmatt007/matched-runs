@@ -2,7 +2,9 @@
     "common": {
         "back": "zurück",
         "delete": "Löschen",
-        "apply": "Anwenden"
+        "apply": "Anwenden",
+        "language": "Sprache",
+        "locale_auto": "Automatisch"
     },
     "nav": {
         "routes": "Passende Routen",

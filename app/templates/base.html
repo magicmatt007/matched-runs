@@ -23,6 +23,23 @@
             <a href="{{ base_path }}/routes" style="color: var(--text); text-decoration: none;">{{ t(request, "nav.routes") }}</a>
             <a href="{{ base_path }}/log" style="color: var(--text); text-decoration: none;">{{ t(request, "nav.log") }}</a>
             <a href="{{ base_path }}/manage" style="color: var(--text); text-decoration: none;">{{ t(request, "nav.manage") }}</a>
+            {% if supported_locales|length > 1 %}
+            <!-- Lets a user override the app's language directly, on top of
+                 (and taking priority over) both the browser's own
+                 Accept-Language and an admin-pinned LOCALE setting - see
+                 resolve_locale()'s precedence in app/i18n.py. Each language
+                 is shown in itself, not translated into the currently
+                 active one - the point of a language picker is finding
+                 your own language, not reading about it in another one. -->
+            <form method="post" action="{{ base_path }}/set-locale">
+                <select name="locale" onchange="this.form.submit()" aria-label="{{ t(request, 'common.language') }}">
+                    <option value="" {% if not cookie_locale(request) %}selected{% endif %}>{{ t(request, "common.locale_auto") }}</option>
+                    {% for code in supported_locales %}
+                    <option value="{{ code }}" {% if cookie_locale(request) == code %}selected{% endif %}>{{ locale_name(code) }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% endif %}
         </nav>
     </header>
     <main>

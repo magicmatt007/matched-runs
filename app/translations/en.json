@@ -2,7 +2,9 @@
   "common": {
     "back": "back",
     "delete": "Delete",
-    "apply": "Apply"
+    "apply": "Apply",
+    "language": "Language",
+    "locale_auto": "Auto"
   },
   "nav": {
     "routes": "Matched Routes",

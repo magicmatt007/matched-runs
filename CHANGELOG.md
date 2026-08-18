@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.17.18
+- Added a language picker to the nav bar - the real fix for choosing the
+  app's language, working identically standalone and under Home Assistant
+  (unlike HA's own per-user frontend language, which an ingress'd app has
+  no way to see - see 1.17.17). Picking a language sets a long-lived
+  cookie (`/set-locale`) that from now on takes priority over both the
+  browser's Accept-Language and the 1.17.17 `locale` config option, so
+  e.g. two people sharing one instance can each pick their own. An "Auto"
+  option clears the cookie back to browser-detected behavior. Each
+  language is shown in itself (e.g. "Deutsch", not "German" while browsing
+  in English) - the point of a language picker is finding your own
+  language, not reading about it in another one.
+  - Verified end-to-end: cookie set/cleared correctly via curl, correct
+    precedence over an explicit Accept-Language header, redirect-back
+    preserves the original path+query from Referer, and interactively in
+    a real browser - picking German switches the whole page immediately,
+    persists across navigation, and even the "Auto" option's own label
+    is translated ("Automatisch" once already in German).
+
 ## 1.17.17
 - Added a `locale` option to the Home Assistant add-on's Configuration tab
   (a language dropdown, currently English/German). Without it, the app's

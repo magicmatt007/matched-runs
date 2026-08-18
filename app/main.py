@@ -1,5 +1,5 @@
 import json
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import time
 import os
 import gzip
@@ -712,6 +712,41 @@ templates.env.filters["pace"] = format_pace
 # handler's context dict.
 templates.env.globals["t"] = i18n.t
 templates.env.globals["locale"] = i18n.resolve_locale
+templates.env.globals["cookie_locale"] = i18n.cookie_locale
+templates.env.globals["locale_name"] = i18n.locale_name
+templates.env.globals["supported_locales"] = i18n.SUPPORTED_LOCALES
+
+
+# ---------------- Locale ----------------
+
+@app.post("/set-locale")
+def set_locale(request: Request, locale: str = Form("")):
+    """Backs the language picker in the nav bar (base.html) - lets a user
+    override the app's language directly, independent of both the
+    browser's Accept-Language header and an admin-pinned LOCALE env var
+    (see resolve_locale()'s precedence in app/i18n.py). An empty/unknown
+    `locale` clears the cookie instead of setting it, which is how the
+    picker's "Auto" option resets back to browser-detected behavior.
+
+    Redirects back to wherever the request came from - taken from Referer
+    with only the path+query kept (host/scheme discarded), same as this
+    app already does for the ingress-path prefix: never trust a header as
+    a redirect target wholesale, just the harmless part of it."""
+    referer = request.headers.get("referer")
+    if referer:
+        parsed = urlparse(referer)
+        next_url = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    else:
+        next_url = ingress_prefix(request) + "/"
+
+    response = RedirectResponse(next_url, status_code=303)
+    if locale in i18n.SUPPORTED_LOCALES:
+        # ~1 year - a deliberate language choice shouldn't need repeating
+        # every session; the picker is always right there to change it.
+        response.set_cookie(i18n.LOCALE_COOKIE_NAME, locale, max_age=365 * 24 * 3600, samesite="lax")
+    else:
+        response.delete_cookie(i18n.LOCALE_COOKIE_NAME)
+    return response
 
 
 def _job_status_response(request: Request, job: dict) -> dict:
