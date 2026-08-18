@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.17.16
+- Table headers can now wrap onto a second line instead of forcing the
+  whole table wider. `.table th, .table td` shared a blanket
+  `white-space: nowrap` - fine for data cells (a date/pace/distance value
+  wrapping mid-string would be unreadable), but it also pinned headers to
+  one line. Surfaced by the first real translation: German's "Tempo /
+  Geschwindigkeit" for "Pace / Speed" is roughly double the English
+  length. Data cells (`.table td`) keep `nowrap`; headers no longer do.
+  - Note: this alone doesn't guarantee wrapping in every case - this
+    table's `table-layout: auto` inside a `.table-responsive { overflow-x:
+    auto }` wrapper lets the browser widen the table instead of wrapping
+    when nothing caps its width. The more reliable fix for a specific
+    over-long header is translator-side: Weblate's per-string
+    "Explanation" and `max-length:N` flag (see the German translation's
+    "Pace / Speed" entry) now document and enforce a length budget for
+    that column, independent of this CSS change.
+
 ## 1.17.15
 - Completed the i18n extraction sweep started in 1.17.14 - no visible
   change yet (only English exists), but every page's UI copy now flows

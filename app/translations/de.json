@@ -1,0 +1,31 @@
+{
+    "common": {
+        "back": "zurück",
+        "delete": "Löschen"
+    },
+    "activities": {
+        "col_date": "Datum",
+        "col_name": "Name",
+        "col_type": "Typ",
+        "col_distance": "Distanz",
+        "col_duration": "Dauer",
+        "col_pace": "Tempo"
+    },
+    "pagination": {
+        "first": "Erste",
+        "prev": "Vorige",
+        "next": "Nächste",
+        "last": "Letzte",
+        "per_page": "Pro Seite:"
+    },
+    "filters": {
+        "filters": "Filter",
+        "all": "Alle",
+        "name_contains": "Name enthält",
+        "from": "Von",
+        "to": "Bis",
+        "distance_km": "Distanz km",
+        "duration_min_label": "Dauer min",
+        "pace_min_label": "Tempo min/km"
+    }
+}

@@ -85,6 +85,14 @@ button.secondary, .button.secondary { background: #2a2e38; }
     text-align: left;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
+}
+/* Data cells stay on one line (a date/pace/distance value wrapping mid-
+   string would be unreadable) - but headers don't get the same
+   protection, since a translated header (e.g. German "Tempo /
+   Geschwindigkeit" for "Pace / Speed") can run noticeably longer than
+   the English source and would otherwise force the whole table wider
+   instead of just wrapping to a second line. */
+.table td {
     white-space: nowrap;
 }
 a { color: #6aa9ff; }
