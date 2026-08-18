@@ -48,6 +48,7 @@ LOCALE_COOKIE_NAME = "locale"
 LOCALE_NAMES = {
     "en": "English",
     "de": "Deutsch",
+    "uk": "Українська",
 }
 
 
@@ -79,14 +80,32 @@ def _lookup(dotted_key: str, locale: str):
 def _plural_suffix(count: int, locale: str) -> str:
     """CLDR plural category for `count`, as an i18next-style key suffix.
 
-    Only implements the "one"/"other" split that English/German-family
-    languages need - a locale with more CLDR categories (Polish's
-    few/many, Arabic's zero/two/few/many, ...) needs its own branch added
-    here *before* it's added to app/translations/, or its plural keys
-    will silently fall back to "_other" for every count. Not backed by a
-    CLDR library on purpose (see the module docstring); extend this table
-    as real locales are added rather than pulling one in speculatively.
+    Most locales so far (English/German-family) only need the "one"/
+    "other" split below. A locale needing more CLDR categories (Arabic's
+    zero/two/few/many, ...) needs its own branch added here *before* it's
+    added to app/translations/, or its plural keys will silently fall back
+    to "_other" for every count. Not backed by a CLDR library on purpose
+    (see the module docstring); extend this table as real locales are
+    added rather than pulling one in speculatively.
     """
+    if locale == "uk":
+        # Ukrainian (like Russian/Polish/other Slavic languages) has four
+        # categories - standard CLDR rule, keyed off the last one/two
+        # digits of the count: 1, 21, 31, ... -> one; 2-4, 22-24, ... ->
+        # few (but not the 12-14 teens, which fall to "many" instead);
+        # everything else (0, 5-9, 11-14, 20, 25, ...) -> many. "other" is
+        # CLDR's catch-all for non-integer values (e.g. 1.5) - unreachable
+        # here since `count` is always a whole number, but still needs a
+        # translated string for completeness (Weblate's editor shows an
+        # input for it regardless).
+        n10, n100 = count % 10, count % 100
+        if n10 == 1 and n100 != 11:
+            return "_one"
+        if 2 <= n10 <= 4 and not (12 <= n100 <= 14):
+            return "_few"
+        if n10 == 0 or 5 <= n10 <= 9 or 11 <= n100 <= 14:
+            return "_many"
+        return "_other"
     return "_one" if count == 1 else "_other"
 
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.17.19
+- Added Ukrainian (`app/translations/uk.json`, 194/194 strings, added to
+  the language picker and the HA `locale` config option's dropdown).
+  Unlike German, Ukrainian needed real code changes, not just a
+  translation file: it's a Slavic language with four CLDR plural
+  categories (one/few/many/other) instead of English/German's two
+  (one/other) - `_plural_suffix()` in app/i18n.py now has a Ukrainian
+  branch implementing the standard CLDR rule (keyed off the count's last
+  one/two digits), and `scripts/check_translations.py` now strips a
+  trailing plural-category suffix before comparing keys against en.json,
+  so a locale legitimately having more plural forms than English (e.g.
+  Ukrainian's `_few`/`_many` alongside English's `_one`/`_other` for the
+  same string) isn't flagged as an error. All 7 pluralized strings in the
+  app got real one/few/many/other Ukrainian forms, not just one/other
+  with the extra categories papered over.
+  - Verified: the full CI-equivalent check suite (including the updated
+    check_translations.py) is clean, and every en.json key/placeholder/
+    HTML tag has a Ukrainian counterpart (checked programmatically, same
+    as for German). Also spot-checked `_plural_suffix("uk", n)` against
+    known CLDR examples (1, 2, 4, 5, 11, 12, 21, 22 -> one/few/few/many/
+    many/many/one/few) directly.
+
 ## 1.17.18
 - Added a language picker to the nav bar - the real fix for choosing the
   app's language, working identically standalone and under Home Assistant

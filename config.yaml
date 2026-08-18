@@ -1,5 +1,5 @@
 name: "Matched Runs"
-version: "1.17.18"
+version: "1.17.19"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -
@@ -62,4 +62,4 @@ schema:
   # reverse proxy, so this app has no way to see what language you picked
   # *inside* HA without the in-app picker. Keep this option list in sync
   # with whatever locales exist under app/translations/*.json.
-  locale: "list(en|de)?"
+  locale: "list(en|de|uk)?"
