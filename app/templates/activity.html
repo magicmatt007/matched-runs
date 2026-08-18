@@ -4,30 +4,30 @@
 {% block content %}
 
 <div class="row" style="justify-content: space-between;">
-    <a href="{{ base_path }}/">&larr; back</a>
+    <a href="{{ base_path }}/">&larr; {{ t(request, "common.back") }}</a>
     <div class="row">
-        {% if prev_id %}<a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/activity/{{ prev_id }}?{{ nav_query_string }}">&larr; Previous</a>{% endif %}
-        {% if next_id %}<a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/activity/{{ next_id }}?{{ nav_query_string }}">Next &rarr;</a>{% endif %}
+        {% if prev_id %}<a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/activity/{{ prev_id }}?{{ nav_query_string }}">&larr; {{ t(request, "activity.previous") }}</a>{% endif %}
+        {% if next_id %}<a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/activity/{{ next_id }}?{{ nav_query_string }}">{{ t(request, "activity.next") }} &rarr;</a>{% endif %}
     </div>
 </div>
 <h2 style="margin-bottom: 4px;">{{ activity.name }}</h2>
 <p style="margin-top: 0;">
     {% if activity.start_time %}<span data-utc-datetime="{{ activity.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ activity.start_time.strftime("%Y-%m-%d %H:%M") }}</span>{% endif %}
     &middot; {{ activity.activity_type }}
-    &middot; via {% if activity.external_activity_url %}<a href="{{ activity.external_activity_url }}" target="_blank" rel="noopener noreferrer">{{ activity.source }} &#8599;</a>{% else %}{{ activity.source }}{% endif %}
+    &middot; {{ t(request, "activity.via") }} {% if activity.external_activity_url %}<a href="{{ activity.external_activity_url }}" target="_blank" rel="noopener noreferrer">{{ activity.source }} &#8599;</a>{% else %}{{ activity.source }}{% endif %}
 </p>
 
 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0;">
     <div class="panel" style="text-align: center; padding: 8px;">
-        <div class="muted">Distance</div>
+        <div class="muted">{{ t(request, "activities.col_distance") }}</div>
         <div style="font-size: 1.1rem; font-weight: 700;">{{ "%.2f"|format(activity.distance_m / 1000) }} km</div>
     </div>
     <div class="panel" style="text-align: center; padding: 8px;">
-        <div class="muted">Duration</div>
+        <div class="muted">{{ t(request, "activities.col_duration") }}</div>
         <div style="font-size: 1.1rem; font-weight: 700;">{{ activity.duration_s | hms }}</div>
     </div>
     <div class="panel" style="text-align: center; padding: 8px;">
-        <div class="muted">{% if is_cycling %}Speed{% else %}Pace{% endif %}</div>
+        <div class="muted">{% if is_cycling %}{{ t(request, "activity.speed") }}{% else %}{{ t(request, "activity.pace") }}{% endif %}</div>
         <div style="font-size: 1.1rem; font-weight: 700;">{{ activity | pace }}</div>
     </div>
 </div>
@@ -41,7 +41,7 @@
     {% if activity.elevation_gain_m is not none %}{% set _ = elevation_parts.append("+" ~ "%.0f"|format(activity.elevation_gain_m)) %}{% endif %}
     {% if activity.elevation_loss_m is not none %}{% set _ = elevation_parts.append("\u2212" ~ "%.0f"|format(activity.elevation_loss_m)) %}{% endif %}
     <div class="panel" style="flex: 1; min-width: 130px; text-align: center; padding: 10px;">
-        <div class="muted">Elevation</div>
+        <div class="muted">{{ t(request, "activity.elevation") }}</div>
         <div style="font-size: 1.2rem; font-weight: 700;">{{ elevation_parts | join(" / ") }} m</div>
     </div>
     {% endif %}
@@ -50,19 +50,19 @@
     {% if activity.avg_heart_rate is not none %}{% set _ = hr_parts.append("%.0f"|format(activity.avg_heart_rate)) %}{% endif %}
     {% if activity.max_heart_rate is not none %}{% set _ = hr_parts.append("%.0f"|format(activity.max_heart_rate)) %}{% endif %}
     <div class="panel" style="flex: 1; min-width: 130px; text-align: center; padding: 10px;">
-        <div class="muted">Heart rate {% if hr_parts|length > 1 %}avg/max{% endif %}</div>
+        <div class="muted">{% if hr_parts|length > 1 %}{{ t(request, "activity.heart_rate_avg_max") }}{% else %}{{ t(request, "activity.heart_rate") }}{% endif %}</div>
         <div style="font-size: 1.2rem; font-weight: 700;">{{ hr_parts | join(" / ") }} bpm</div>
     </div>
     {% endif %}
     {% if activity.avg_cadence is not none %}
     <div class="panel" style="flex: 1; min-width: 130px; text-align: center; padding: 10px;">
-        <div class="muted">Avg cadence</div>
+        <div class="muted">{{ t(request, "activity.avg_cadence") }}</div>
         <div style="font-size: 1.2rem; font-weight: 700;">{{ "%.0f"|format(activity.avg_cadence) }} spm</div>
     </div>
     {% endif %}
     {% if activity.calories is not none %}
     <div class="panel" style="flex: 1; min-width: 130px; text-align: center; padding: 10px;">
-        <div class="muted">Calories</div>
+        <div class="muted">{{ t(request, "activity.calories") }}</div>
         <div style="font-size: 1.2rem; font-weight: 700;">{{ "%.0f"|format(activity.calories) }}</div>
     </div>
     {% endif %}
@@ -105,52 +105,49 @@ window.matchedRunsHideMapPoint = function () {
 </script>
 {% else %}
 <div class="panel">
-    <p class="muted">No map to show - this activity has no GPS track.</p>
+    <p class="muted">{{ t(request, "activity.no_map") }}</p>
 </div>
 {% endif %}
 
 <div class="row" style="justify-content: space-between; align-items: center; margin: 10px 0;">
     <div>
         {% if activity.group_id %}
-        <a href="{{ base_path }}/group/{{ activity.group_id }}">View {{ (group_count or 1) - 1 }} other matched run(s) on this route &rarr;</a>
+        <a href="{{ base_path }}/group/{{ activity.group_id }}">{{ t(request, "activity.view_other_matches", count=(group_count or 1) - 1) }} &rarr;</a>
         {% elif activity.full_points %}
-        <span class="muted">No matches found yet for this route.</span>
+        <span class="muted">{{ t(request, "activity.no_matches_yet") }}</span>
         {% else %}
-        <span class="muted">No GPS track, so this activity can't be route-matched.</span>
+        <span class="muted">{{ t(request, "activity.no_gps_track") }}</span>
         {% endif %}
     </div>
     <form method="post" action="{{ base_path }}/activity/{{ activity.id }}/delete"
-          data-confirm="Delete this activity permanently? This can't be undone.">
-        <button type="submit" class="secondary">Delete</button>
+          data-confirm="{{ t(request, 'activity.delete_confirm') }}">
+        <button type="submit" class="secondary">{{ t(request, "common.delete") }}</button>
     </form>
 </div>
 
 
 {% if chart_points %}
 <div class="row" id="chart-xaxis-toggle" style="justify-content: flex-end; gap: 6px; margin: 10px 0 -2px;">
-    <span class="muted" style="font-size: 0.85rem;">X-axis:</span>
-    <button type="button" class="button" data-xaxis="distance" id="chart-xaxis-distance-btn">Distance</button>
-    <button type="button" class="button secondary" data-xaxis="time" id="chart-xaxis-time-btn">Time</button>
+    <span class="muted" style="font-size: 0.85rem;">{{ t(request, "activity.xaxis_label") }}</span>
+    <button type="button" class="button" data-xaxis="distance" id="chart-xaxis-distance-btn">{{ t(request, "activities.col_distance") }}</button>
+    <button type="button" class="button secondary" data-xaxis="time" id="chart-xaxis-time-btn">{{ t(request, "activity.time") }}</button>
 </div>
 
 <div class="panel">
-    <h3 style="margin-top:0;">Elevation (m)</h3>
+    <h3 style="margin-top:0;">{{ t(request, "activity.elevation_m_heading") }}</h3>
     <div id="elevation-chart"></div>
 </div>
 
 <div class="panel">
-    <h3 style="margin-top:0;">{% if is_cycling %}Speed (km/h){% else %}Pace (min/km){% endif %}</h3>
+    <h3 style="margin-top:0;">{% if is_cycling %}{{ t(request, "activity.speed_kmh_heading") }}{% else %}{{ t(request, "activity.pace_minkm_heading") }}{% endif %}</h3>
     <div id="pace-chart"></div>
     {% if pace_is_estimated %}
-    <p class="muted" style="margin-bottom: 0; margin-top: 8px;">Estimated from
-        this activity's total duration (imported before per-point timing
-        was tracked) - the overall shape is representative, but won't be as
-        precise as activities with exact per-point timestamps.</p>
+    <p class="muted" style="margin-bottom: 0; margin-top: 8px;">{{ t(request, "activity.pace_estimated_note") }}</p>
     {% endif %}
 </div>
 
 <div class="panel">
-    <h3 style="margin-top:0;">Heart Rate (bpm)</h3>
+    <h3 style="margin-top:0;">{{ t(request, "activity.heart_rate_bpm_heading") }}</h3>
     <div id="heart-rate-chart"></div>
 </div>
 {% endif %}
@@ -159,13 +156,31 @@ window.matchedRunsHideMapPoint = function () {
 (function () {
     var chartPoints = {{ chart_points | tojson }};
 
+    // Chart copy translated server-side and handed to this script as
+    // plain strings, rather than assembled by concatenating a translated
+    // fragment into an English sentence shape (e.g. "Not enough data for
+    // a/an {label} chart" needs a real per-language sentence, not
+    // English's a/an article logic applied to a translated word).
+    var I18N = {
+        hoverPrompt: {{ t(request, "activity.hover_prompt") | tojson }},
+        avgPrefix: {{ t(request, "activity.avg_prefix") | tojson }},
+        xAxisDistance: {{ t(request, "activities.col_distance") | tojson }},
+        xAxisTime: {{ t(request, "activity.time") | tojson }},
+        notEnoughData: {
+            elevation: {{ t(request, "activity.not_enough_data_elevation") | tojson }},
+            heart_rate: {{ t(request, "activity.not_enough_data_heart_rate") | tojson }},
+            pace: {{ t(request, "activity.not_enough_data_pace") | tojson }},
+            speed: {{ t(request, "activity.not_enough_data_speed") | tojson }}
+        }
+    };
+
     // Shared renderer for both charts below: x-axis is actual distance
     // along the route (not just point order), with an average reference
     // line, and hover interactivity - moving the mouse over the chart
     // shows the exact value/distance at that point and highlights the
     // matching spot on the map above (via the hooks the map script
     // exposed), since every chart point carries the lat/lon it came from.
-    function renderProfileChart(containerId, valueKey, color, unit, label, opts) {
+    function renderProfileChart(containerId, valueKey, color, unit, dataKey, opts) {
         opts = opts || {};
         var invertY = opts.invertY || false;
         var formatValue = opts.formatValue || function (v) { return Math.round(v) + unit; };
@@ -192,8 +207,7 @@ window.matchedRunsHideMapPoint = function () {
                    p[xKey] !== null && p[xKey] !== undefined;
         });
         if (validPoints.length < 2) {
-            var article = /^[aeiou]/i.test(label) ? 'an' : 'a';
-            container.innerHTML = '<p class="muted">Not enough data for ' + article + ' ' + label.toLowerCase() + ' chart.</p>';
+            container.innerHTML = '<p class="muted">' + I18N.notEnoughData[dataKey] + '</p>';
             return;
         }
 
@@ -256,7 +270,7 @@ window.matchedRunsHideMapPoint = function () {
         var avgY = yFor(avg);
         svg += '<line x1="' + padding.left + '" y1="' + avgY + '" x2="' + (width - padding.right) + '" y2="' + avgY +
                '" stroke="' + color + '" stroke-width="1" stroke-dasharray="4,3" opacity="0.6" />';
-        svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">avg ' + formatValue(avg) + '</text>';
+        svg += '<text x="' + (width - padding.right - 4) + '" y="' + (avgY - 4) + '" text-anchor="end" font-size="11" fill="' + color + '">' + I18N.avgPrefix + ' ' + formatValue(avg) + '</text>';
 
         // main line
         var linePoints = validPoints.map(function (p) { return xFor(p[xKey]) + ',' + yFor(p[valueKey]); }).join(' ');
@@ -270,7 +284,7 @@ window.matchedRunsHideMapPoint = function () {
         svg += '<rect id="' + containerId + '-hoverrect" x="' + padding.left + '" y="' + padding.top + '" width="' + plotW + '" height="' + plotH + '" fill="transparent" />';
 
         svg += '</svg>';
-        svg += '<div id="' + containerId + '-tooltip" class="muted" style="min-height: 18px; font-size: 0.85rem;">Hover the chart for details</div>';
+        svg += '<div id="' + containerId + '-tooltip" class="muted" style="min-height: 18px; font-size: 0.85rem;">' + I18N.hoverPrompt + '</div>';
 
         container.innerHTML = svg;
 
@@ -321,7 +335,7 @@ window.matchedRunsHideMapPoint = function () {
         function handleLeave() {
             hoverLine.setAttribute('opacity', 0);
             hoverDot.setAttribute('opacity', 0);
-            tooltip.textContent = 'Hover the chart for details';
+            tooltip.textContent = I18N.hoverPrompt;
             if (window.matchedRunsHideMapPoint) {
                 window.matchedRunsHideMapPoint();
             }
@@ -384,14 +398,14 @@ window.matchedRunsHideMapPoint = function () {
         if (mode === 'time') {
             return {
                 xKey: 'elapsed_s',
-                xAxisLabel: 'Time',
+                xAxisLabel: I18N.xAxisTime,
                 formatXTick: formatElapsed,
                 formatXValue: formatElapsed
             };
         }
         return {
             xKey: 'dist_km',
-            xAxisLabel: 'Distance (km)',
+            xAxisLabel: I18N.xAxisDistance + ' (km)',
             formatXTick: function (v) { return v.toFixed(1); },
             formatXValue: function (v) { return v.toFixed(2) + ' km'; }
         };
@@ -400,12 +414,12 @@ window.matchedRunsHideMapPoint = function () {
     function renderCharts(xAxisMode) {
         var xOpts = xAxisOpts(xAxisMode);
 
-        renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'Elevation', Object.assign({
+        renderProfileChart('elevation-chart', 'elevation', '#3cb44b', ' m', 'elevation', Object.assign({
             // No unit on the axis itself - the chart title already says
             // "Elevation (m)", and the axis is the tightest space in the chart.
             formatAxisTick: function (v) { return Math.round(v); }
         }, xOpts));
-        renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'Heart Rate', Object.assign({
+        renderProfileChart('heart-rate-chart', 'heart_rate', '#e6194b', ' bpm', 'heart_rate', Object.assign({
             // Same reasoning - "158 bpm" doesn't fit the axis's reserved
             // space the way "158" does, which is what was actually causing
             // the labels to be clipped (visible in the reported screenshot).
@@ -413,12 +427,12 @@ window.matchedRunsHideMapPoint = function () {
         }, xOpts));
 
         if (isCycling) {
-            renderProfileChart('pace-chart', 'speed_kmh', '#4363d8', ' km/h', 'Speed', Object.assign({
+            renderProfileChart('pace-chart', 'speed_kmh', '#4363d8', ' km/h', 'speed', Object.assign({
                 formatValue: function (v) { return v.toFixed(1) + ' km/h'; },
                 formatAxisTick: function (v) { return v.toFixed(0); }
             }, xOpts));
         } else {
-            renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'Pace', Object.assign({
+            renderProfileChart('pace-chart', 'pace_s_per_km', '#4363d8', ' /km', 'pace', Object.assign({
                 invertY: true,
                 formatValue: function (v) { return formatPace(v) + ' /km'; },
                 // Shorter, no unit - the chart title already says "Pace (min/km)",

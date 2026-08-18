@@ -1,234 +1,222 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
-{% block title %}Import & Sync{% endblock %}
+{% block title %}{{ t(request, "nav.manage") }}{% endblock %}
 {% block content %}
 
-<a href="{{ base_path }}/">&larr; back to activities</a>
-<h2>Import &amp; Sync</h2>
+<a href="{{ base_path }}/">&larr; {{ t(request, "manage.back_to_activities") }}</a>
+<h2>{{ t(request, "nav.manage") }}</h2>
 
 {% if upload_result %}
 <section class="panel" style="border-color: {% if upload_result.imported|int > 0 or upload_result.updated|int > 0 %}#3cb44b{% else %}#e6194b{% endif %};">
-    <h2>Upload result</h2>
-    <p>
-        <strong>{{ upload_result.imported }}</strong> newly imported,
-        <strong>{{ upload_result.updated }}</strong> updated (existing activity, new info picked up),
-        <strong>{{ upload_result.duplicates }}</strong> unchanged,
-        <strong>{{ upload_result.skipped }}</strong> skipped
-        ({{ upload_result.unsupported }} had an unsupported file type).
-    </p>
+    <h2>{{ t(request, "manage.upload_result") }}</h2>
+    <p>{{ t(request, "manage.upload_result_summary", imported=upload_result.imported, updated=upload_result.updated, duplicates=upload_result.duplicates, skipped=upload_result.skipped, unsupported=upload_result.unsupported) | safe }}</p>
     {% if upload_result.imported|int == 0 and upload_result.updated|int == 0 %}
-    <p class="muted">Nothing was imported. Check the container logs
-        (<code>docker compose logs matched-runs</code>) — every skipped file is
-        logged there with the reason (unsupported extension, no GPS data,
-        parse error, etc).</p>
+    <p class="muted">{{ t(request, "manage.nothing_imported") | safe }}</p>
     {% endif %}
 </section>
 {% endif %}
 
 <section class="panel" id="import-progress-panel" style="display:none;">
-    <h2>Import progress</h2>
+    <h2>{{ t(request, "manage.import_progress") }}</h2>
     <div id="import-progress-content"></div>
 </section>
 
 <section class="panel">
-    <h2>Database export / import</h2>
-    <p class="muted">Useful for running the initial bulk import and route
-        matching on a faster machine (e.g. a desktop instead of a Raspberry
-        Pi), then moving the already-populated database over to wherever
-        you actually run the app day to day.</p>
+    <h2>{{ t(request, "manage.db_export_import") }}</h2>
+    <p class="muted">{{ t(request, "manage.db_export_import_note") }}</p>
     {% if base_path %}
-    <p style="color:#f58231;">You're viewing this through Home Assistant's
-        ingress sidebar right now. If your database is larger than ~16MB,
-        <strong>importing</strong> it here will fail with "Maximum request
-        body size exceeded" - that's a hardcoded Supervisor limit on
-        ingress traffic, not something this app can work around. Use
-        <strong>port 8000</strong> instead for the import specifically -
-        <code>http://&lt;your-ha-host&gt;:8000/manage</code> - not port
-        8123 (Home Assistant's own port still goes through the same
-        ingress limit even on your local network - it's specifically the
-        port number that matters here, not whether the address is local or
-        public). Export/download isn't affected, only import.</p>
+    <p style="color:#f58231;">{{ t(request, "manage.ingress_import_warning") | safe }}</p>
     {% endif %}
     <div class="row">
-        <a class="button" href="{{ base_path }}/manage/export-db">Export database</a>
+        <a class="button" href="{{ base_path }}/manage/export-db">{{ t(request, "manage.export_database") }}</a>
     </div>
     <form id="db-import-form" action="{{ base_path }}/manage/import-db" method="post" enctype="multipart/form-data" class="row" style="margin-top: 10px;">
         <input type="file" name="db_file" id="db-import-file" accept=".db" required>
-        <button type="submit" class="secondary">Import database</button>
+        <button type="submit" class="secondary">{{ t(request, "manage.import_database") }}</button>
     </form>
-    <p class="muted" style="margin-top: 4px;">Importing completely replaces
-        all current data - there's no merge. Make sure that's really what
-        you want before confirming.</p>
+    <p class="muted" style="margin-top: 4px;">{{ t(request, "manage.import_replaces_note") }}</p>
 </section>
 
 <section class="panel" id="db-import-progress-panel" style="display:none;">
-    <h2>Database import progress</h2>
+    <h2>{{ t(request, "manage.db_import_progress") }}</h2>
     <div id="db-import-progress-content"></div>
 </section>
 
 <section class="panel">
-    <h2>Import activities</h2>
-    <p class="muted">A large bulk import (a full export folder, especially
-        with many activities) can hit an upload size limit imposed by
-        whatever's in front of this app, not by the app itself - Home
-        Assistant's ingress caps requests at about 16MB, and a Cloudflare
-        Tunnel or similar reverse proxy commonly caps them around 100MB on
-        free/pro plans. If a large import fails partway through with a
-        "413" or "Payload Too Large" error (possibly showing a Cloudflare
-        or Home Assistant error page rather than anything from this app),
-        that's what's happening. Use <strong>port 8000</strong> for large
-        imports instead - <code>http://&lt;your-ha-host&gt;:8000/manage</code> -
-        not Home Assistant's own port 8123, which still goes through
-        ingress even on your local network and hits the same 16MB limit;
-        it's specifically the port number that matters, not whether the
-        address is local or public. Port 8000 bypasses both limits at
-        once.</p>
+    <h2>{{ t(request, "manage.import_activities") }}</h2>
+    <p class="muted">{{ t(request, "manage.upload_size_limit_note") | safe }}</p>
     <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row">
         <input type="file" name="files" multiple accept=".gpx,.fit,.tcx,.gz,.csv">
-        <button type="submit">Upload selected files</button>
+        <button type="submit">{{ t(request, "manage.upload_selected_files") }}</button>
     </form>
     <form action="{{ base_path }}/upload" method="post" enctype="multipart/form-data" class="row" style="margin-top: 8px;">
         <input type="file" name="files" multiple webkitdirectory>
-        <button type="submit">Upload entire folder</button>
+        <button type="submit">{{ t(request, "manage.upload_entire_folder") }}</button>
     </form>
-    <p class="muted">Select as many files as you like at once — e.g. your whole
-        unzipped Garmin or Strava export folder (Strava: Settings &rarr; My
-        Account &rarr; Download or Delete Your Account &rarr; Request Your
-        Archive), or use "Upload entire folder" to pick the folder directly.
-        GPX, FIT, and TCX are all supported, including gzip-compressed files
-        (<code>.gpx.gz</code> / <code>.fit.gz</code> / <code>.tcx.gz</code>,
-        as Strava's export uses). If your Strava export's top-level
-        <code>activities.csv</code> is included, your real Strava activity
-        titles are recovered automatically (works even if uploaded separately,
-        after the fact, to backfill names on what's already imported). Files
-        without GPS data (indoor activities) are skipped automatically.</p>
+    <p class="muted">{{ t(request, "manage.upload_files_note") | safe }}</p>
 
     <div class="row" style="margin-top: 10px;">
         {% if strava_configured %}
             {% if strava_connected %}
                 <form action="{{ base_path }}/strava/sync" method="post">
-                    <button type="submit">Sync from Strava</button>
+                    <button type="submit">{{ t(request, "manage.sync_from_strava") }}</button>
                 </form>
                 <form action="{{ base_path }}/strava/disconnect" method="post">
-                    <button type="submit" class="secondary">Disconnect Strava</button>
+                    <button type="submit" class="secondary">{{ t(request, "manage.disconnect_strava") }}</button>
                 </form>
             {% else %}
-                <a class="button" href="{{ base_path }}/strava/login">Connect Strava</a>
+                <a class="button" href="{{ base_path }}/strava/login">{{ t(request, "manage.connect_strava") }}</a>
             {% endif %}
         {% else %}
-            <span class="muted">Strava sync not configured (set STRAVA_CLIENT_ID / SECRET in .env to enable)</span>
+            <span class="muted">{{ t(request, "manage.strava_not_configured") }}</span>
         {% endif %}
 
         <form action="{{ base_path }}/rebuild" method="post">
-            <button type="submit" class="secondary">Recompute matches</button>
+            <button type="submit" class="secondary">{{ t(request, "manage.recompute_matches") }}</button>
         </form>
         <form action="{{ base_path }}/dedupe" method="post">
-            <button type="submit" class="secondary">Merge duplicate activities</button>
+            <button type="submit" class="secondary">{{ t(request, "manage.merge_duplicates") }}</button>
         </form>
         <form action="{{ base_path }}/normalize-types" method="post">
-            <button type="submit" class="secondary">Strip Garmin "V2" type suffixes</button>
+            <button type="submit" class="secondary">{{ t(request, "manage.strip_v2_suffixes") }}</button>
         </form>
     </div>
     {% if type_merge_result %}
     <section class="panel" style="border-color: {% if type_merge_result.changed|int > 0 %}#3cb44b{% else %}#e6194b{% endif %}; margin-top: 10px;">
-        <h3 style="margin-top:0;">Merge activity types result</h3>
+        <h3 style="margin-top:0;">{{ t(request, "manage.merge_types_result") }}</h3>
         {% if type_merge_result.changed|int > 0 %}
-        <p><strong>{{ type_merge_result.changed }}</strong> activit{{ "y" if type_merge_result.changed|int == 1 else "ies" }}
-            relabeled from <strong>{{ type_merge_result.from_types }}</strong> to <strong>{{ type_merge_result.to_type }}</strong>.</p>
+        <p>{{ t(request, "manage.merge_types_changed", count=type_merge_result.changed|int, from_types=type_merge_result.from_types, to_type=type_merge_result.to_type) | safe }}</p>
         {% else %}
-        <p>No activities matched <strong>{{ type_merge_result.from_types }}</strong> - nothing was changed.</p>
+        <p>{{ t(request, "manage.merge_types_unchanged", from_types=type_merge_result.from_types) | safe }}</p>
         {% endif %}
     </section>
     {% endif %}
     <form action="{{ base_path }}/merge-activity-types" method="post" id="merge-types-form" style="margin-top: 10px;">
-        <label class="muted">Merge these types:</label>
+        <label class="muted">{{ t(request, "manage.merge_these_types") }}</label>
         <div class="row" style="gap: 4px 14px; margin: 6px 0;">
-            {% for t in activity_types %}
+            {% for type_row in activity_types %}
             <label class="row" style="gap: 4px; font-weight: normal;">
-                <input type="checkbox" name="from_types" value="{{ t.name }}"> {{ t.name }} ({{ t.count }})
+                <input type="checkbox" name="from_types" value="{{ type_row.name }}"> {{ type_row.name }} ({{ type_row.count }})
             </label>
             {% endfor %}
         </div>
         <div class="row">
-            <label class="muted" for="to_type">into:</label>
+            <label class="muted" for="to_type">{{ t(request, "manage.into") }}</label>
             <input type="text" name="to_type" id="to_type" list="activity-type-options" placeholder="e.g. Hiking" required>
             <datalist id="activity-type-options">
-                {% for t in activity_types %}
-                <option value="{{ t.name }}">
+                {% for type_row in activity_types %}
+                <option value="{{ type_row.name }}">
                 {% endfor %}
             </datalist>
         </div>
         <div class="row" style="margin-top: 6px;">
             <label class="row" style="gap: 4px; font-weight: normal;">
-                <input type="checkbox" id="cutoff_enabled"> Only activities before:
+                <input type="checkbox" id="cutoff_enabled"> {{ t(request, "manage.only_activities_before") }}
             </label>
             <input type="date" name="cutoff_date" id="cutoff_date" value="2026-04-01" disabled>
         </div>
-        <button type="submit" class="secondary" style="margin-top: 6px;">Merge activity types</button>
+        <button type="submit" class="secondary" style="margin-top: 6px;">{{ t(request, "manage.merge_activity_types") }}</button>
     </form>
-    <p class="muted" style="margin-top: 4px;">Useful if the same real
-        activity ended up logged under different type labels - e.g. an old
-        watch only offering a limited choice of types, so the same kind of
-        outing was "Walking" one year and "Hiking" another. Pick any number
-        of existing types above, and a destination type to relabel them all
-        to (an existing one, or type a new name). Optionally restrict this
-        to activities before a given date, leaving anything after as-is.</p>
+    <p class="muted" style="margin-top: 4px;">{{ t(request, "manage.merge_types_note") }}</p>
 
     <form action="{{ base_path }}/rename-activities" method="post" class="row" style="margin-top: 10px;"
-          data-confirm="This renames EVERY activity to '[City] [Activity Type]' (e.g. 'Zurich Running'), overwriting current names. Continue?">
-        <button type="submit" class="secondary">Rename all activities by city</button>
+          data-confirm="{{ t(request, 'manage.rename_confirm') }}">
+        <button type="submit" class="secondary">{{ t(request, "manage.rename_by_city") }}</button>
     </form>
-    <p class="muted" style="margin-top: 4px;">Renames every activity to
-        "[City] [Activity Type]" using its start location (e.g. "Zurich
-        Running"), looked up via OpenStreetMap's free geocoding service.
-        That service limits lookups to about one per second, so this can
-        take a while for a large history - progress is shown below once
-        started. Activities at the same location only need one lookup, so
-        it's much faster after the first run. Indoor activities with no GPS
-        track are left untouched.</p>
+    <p class="muted" style="margin-top: 4px;">{{ t(request, "manage.rename_by_city_note") }}</p>
 
-    <p class="muted">{{ total_activities }} activities imported.</p>
+    <p class="muted">{{ t(request, "manage.activities_imported_count", count=total_activities) }}</p>
 </section>
 
 <section class="panel" id="rebuild-progress-panel" style="display:none;">
-    <h2>Recompute progress</h2>
+    <h2>{{ t(request, "manage.recompute_progress") }}</h2>
     <div id="rebuild-progress-content"></div>
 </section>
 
 <section class="panel" id="rename-progress-panel" style="display:none;">
-    <h2>Rename progress</h2>
+    <h2>{{ t(request, "manage.rename_progress") }}</h2>
     <div id="rename-progress-content"></div>
 </section>
 
 <section class="panel">
-    <h2>Garmin auto-sync</h2>
+    <h2>{{ t(request, "manage.garmin_autosync") }}</h2>
     {% if garmin_has_session %}
-        <p>Automatic sync is <strong>on</strong> — checking for new activities
-            every {{ garmin_sync_interval }} minutes.</p>
+        <p>{{ t(request, "manage.garmin_autosync_on", interval=garmin_sync_interval) | safe }}</p>
         <div class="row">
             <form action="{{ base_path }}/garmin/sync" method="post">
-                <button type="submit">Sync from Garmin now</button>
+                <button type="submit">{{ t(request, "manage.sync_from_garmin_now") }}</button>
             </form>
-            <a class="button secondary" href="{{ base_path }}/garmin/login">Re-login / switch account</a>
+            <a class="button secondary" href="{{ base_path }}/garmin/login">{{ t(request, "manage.relogin_switch_account") }}</a>
         </div>
     {% else %}
-        <p class="muted">Not connected yet.
-            {% if garmin_configured %}A GARMIN_EMAIL/GARMIN_PASSWORD fallback is
-            configured in .env, but no saved login session was found yet.{% endif %}</p>
-        <a class="button" href="{{ base_path }}/garmin/login">Connect Garmin</a>
-        <p class="muted" style="margin-top: 8px;">Uses an unofficial method
-            (there's no public Garmin API for personal use), so treat it as
-            best-effort — it can break if Garmin changes their login flow.</p>
+        <p class="muted">{{ t(request, "manage.garmin_not_connected") }}
+            {% if garmin_configured %}{{ t(request, "manage.garmin_env_fallback_note") }}{% endif %}</p>
+        <a class="button" href="{{ base_path }}/garmin/login">{{ t(request, "garmin_login.title") }}</a>
+        <p class="muted" style="margin-top: 8px;">{{ t(request, "manage.garmin_unofficial_note") }}</p>
     {% endif %}
 </section>
 
 <section class="panel" id="garmin-progress-panel" style="display:none;">
-    <h2>Garmin sync progress</h2>
+    <h2>{{ t(request, "manage.garmin_sync_progress") }}</h2>
     <div id="garmin-progress-content"></div>
 </section>
 
 <script>
 (function () {
+    // Translated copy for this page's poll-loop-rendered progress text,
+    // handed over from Jinja as plain strings (see app/i18n.py) rather
+    // than assembled by concatenating translated fragments into an
+    // English sentence shape - fmt() below does simple {placeholder}
+    // substitution so translators can reorder a sentence around its
+    // dynamic values, the same as t()'s server-side .format() does.
+    var I18N = {
+        importingFiles: {{ t(request, "manage.js_importing_files") | tojson }},
+        computingMatches: {{ t(request, "manage.js_computing_matches") | tojson }},
+        computingMatchesIndeterminate: {{ t(request, "manage.js_computing_matches_indeterminate") | tojson }},
+        estimatingTime: {{ t(request, "manage.js_estimating_time") | tojson }},
+        etaRemaining: {{ t(request, "manage.js_eta_remaining") | tojson }},
+        etaUnknown: {{ t(request, "manage.js_eta_unknown") | tojson }},
+        importDone: {{ t(request, "manage.js_import_done") | tojson }},
+        unsupportedType: {{ t(request, "manage.js_unsupported_type") | tojson }},
+        noUsableData: {{ t(request, "manage.js_no_usable_data") | tojson }},
+        importFailed: {{ t(request, "manage.js_import_failed") | tojson }},
+        importFailedGeneric: {{ t(request, "manage.js_import_failed_generic") | tojson }},
+        connectingGarmin: {{ t(request, "manage.js_connecting_garmin") | tojson }},
+        checkingActivities: {{ t(request, "manage.js_checking_activities") | tojson }},
+        syncingActivities: {{ t(request, "manage.js_syncing_activities") | tojson }},
+        syncing: {{ t(request, "manage.js_syncing") | tojson }},
+        garminDone: {{ t(request, "manage.js_garmin_done") | tojson }},
+        garminFailed: {{ t(request, "manage.js_garmin_failed") | tojson }},
+        receivingUpload: {{ t(request, "manage.js_receiving_upload") | tojson }},
+        writingDatabase: {{ t(request, "manage.js_writing_database") | tojson }},
+        validatingFile: {{ t(request, "manage.js_validating_file") | tojson }},
+        replacingDatabase: {{ t(request, "manage.js_replacing_database") | tojson }},
+        updatingSchema: {{ t(request, "manage.js_updating_schema") | tojson }},
+        dbImportSuccess: {{ t(request, "manage.js_db_import_success") | tojson }},
+        uploading: {{ t(request, "manage.js_uploading") | tojson }},
+        uploadingBare: {{ t(request, "manage.js_uploading_bare") | tojson }},
+        uploadingProgress: {{ t(request, "manage.js_uploading_progress") | tojson }},
+        ingressSizeAlert: {{ t(request, "manage.js_ingress_size_alert") | tojson }},
+        dbReplaceConfirm: {{ t(request, "manage.js_db_replace_confirm") | tojson }},
+        processing: {{ t(request, "manage.js_processing") | tojson }},
+        uploadFailed: {{ t(request, "manage.js_upload_failed") | tojson }},
+        comparingActivities: {{ t(request, "manage.js_comparing_activities") | tojson }},
+        gettingStarted: {{ t(request, "manage.js_getting_started") | tojson }},
+        recomputeFinished: {{ t(request, "manage.js_recompute_finished") | tojson }},
+        recomputeFailed: {{ t(request, "manage.js_recompute_failed") | tojson }},
+        pickTypeAlert: {{ t(request, "manage.js_pick_type_alert") | tojson }},
+        renaming: {{ t(request, "manage.js_renaming") | tojson }},
+        renameDone: {{ t(request, "manage.js_rename_done") | tojson }},
+        renameSkippedFragment: {{ t(request, "manage.js_rename_skipped_fragment") | tojson }},
+        renameFailed: {{ t(request, "manage.js_rename_failed") | tojson }}
+    };
+
+    function fmt(str, params) {
+        return str.replace(/\{(\w+)\}/g, function (match, key) {
+            return (params && key in params) ? params[key] : match;
+        });
+    }
+
     // Shared helpers between the import-progress and Garmin-sync-progress
     // panels below, so the ETA/progress-bar logic isn't duplicated twice.
     function formatDuration(seconds) {
@@ -248,11 +236,11 @@
     function etaLine(fraction, startedAt) {
         var elapsed = (Date.now() / 1000) - startedAt;
         if (fraction < 0.02 || elapsed < 2) {
-            return '<p class="muted">Estimating time remaining&hellip;</p>';
+            return '<p class="muted">' + I18N.estimatingTime + '</p>';
         }
         var eta = (elapsed / fraction) * (1 - fraction);
         var formatted = formatDuration(eta);
-        return '<p class="muted">Estimated time remaining: ~' + (formatted || 'unknown') + '</p>';
+        return '<p class="muted">' + fmt(I18N.etaRemaining, { eta: formatted || I18N.etaUnknown }) + '</p>';
     }
 
     function indeterminateLine(text) {
@@ -277,13 +265,13 @@
             if (job.phase === 'importing') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML =
-                    '<p>Importing files: ' + job.processed + ' / ' + job.total + '</p>' +
+                    '<p>' + fmt(I18N.importingFiles, { done: job.processed, total: job.total }) + '</p>' +
                     progressBar(frac) +
                     etaLine(frac, job.started_at);
             } else if (job.phase === 'matching') {
                 var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
                 content.innerHTML =
-                    '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' +
+                    '<p>' + fmt(I18N.computingMatches, { pct: Math.round(frac * 100) }) + '</p>' +
                     progressBar(frac) +
                     etaLine(frac, job.started_at);
             } else if (job.phase === 'done') {
@@ -298,17 +286,18 @@
                 // never a real recorded activity - confirmed directly
                 // against a real export, tens of thousands of them).
                 var skipReasons = [];
-                if (job.unsupported) skipReasons.push(job.unsupported + ' unsupported file type');
-                if (job.empty) skipReasons.push(job.empty + ' with no usable activity data');
-                content.innerHTML =
-                    '<p><strong>' + job.added + '</strong> newly imported, ' +
-                    '<strong>' + job.updated + '</strong> updated, ' +
-                    '<strong>' + job.unchanged + '</strong> unchanged, ' +
-                    '<strong>' + job.skipped + '</strong> skipped' +
-                    (skipReasons.length ? ' (' + skipReasons.join(', ') + ')' : '') + '.</p>';
+                if (job.unsupported) skipReasons.push(fmt(I18N.unsupportedType, { count: job.unsupported }));
+                if (job.empty) skipReasons.push(fmt(I18N.noUsableData, { count: job.empty }));
+                content.innerHTML = '<p>' + fmt(I18N.importDone, {
+                    added: '<strong>' + job.added + '</strong>',
+                    updated: '<strong>' + job.updated + '</strong>',
+                    unchanged: '<strong>' + job.unchanged + '</strong>',
+                    skipped: '<strong>' + job.skipped + '</strong>',
+                    reasons: skipReasons.length ? ' (' + skipReasons.join(', ') + ')' : ''
+                }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
-                content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
+                content.innerHTML = '<p style="color:#e6194b;">' + fmt(I18N.importFailed, { error: job.error }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             }
         }
@@ -341,26 +330,27 @@
             panel.style.display = 'block';
 
             if (job.phase === 'connecting') {
-                content.innerHTML = indeterminateLine('Connecting to Garmin');
+                content.innerHTML = indeterminateLine(I18N.connectingGarmin);
             } else if (job.phase === 'fetching') {
-                content.innerHTML = indeterminateLine('Checking for new activities');
+                content.innerHTML = indeterminateLine(I18N.checkingActivities);
             } else if (job.phase === 'syncing') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML = job.total > 0
-                    ? '<p>Syncing activities: ' + job.processed + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
-                    : indeterminateLine('Syncing');
+                    ? '<p>' + fmt(I18N.syncingActivities, { done: job.processed, total: job.total }) + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine(I18N.syncing);
             } else if (job.phase === 'matching') {
                 var frac = job.match_total > 0 ? job.match_done / job.match_total : 0;
                 content.innerHTML = job.match_total > 0
-                    ? '<p>Computing route matches&hellip; (' + Math.round(frac * 100) + '%)</p>' + progressBar(frac) + etaLine(frac, job.started_at)
-                    : indeterminateLine('Computing route matches');
+                    ? '<p>' + fmt(I18N.computingMatches, { pct: Math.round(frac * 100) }) + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine(I18N.computingMatchesIndeterminate);
             } else if (job.phase === 'done') {
-                content.innerHTML =
-                    '<p><strong>' + job.added + '</strong> newly imported, ' +
-                    '<strong>' + job.updated + '</strong> updated.</p>';
+                content.innerHTML = '<p>' + fmt(I18N.garminDone, {
+                    added: '<strong>' + job.added + '</strong>',
+                    updated: '<strong>' + job.updated + '</strong>'
+                }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
-                content.innerHTML = '<p style="color:#e6194b;">Garmin sync failed: ' + job.error + '</p>';
+                content.innerHTML = '<p style="color:#e6194b;">' + fmt(I18N.garminFailed, { error: job.error }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             }
         }
@@ -401,26 +391,26 @@
             if (job.phase === 'receiving') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML =
-                    '<p>Server receiving upload: ' + formatBytes(job.processed) + ' / ' + formatBytes(job.total) + '</p>' +
+                    '<p>' + fmt(I18N.receivingUpload, { done: formatBytes(job.processed), total: formatBytes(job.total) }) + '</p>' +
                     progressBar(frac) +
                     etaLine(frac, job.started_at);
             } else if (job.phase === 'writing') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML =
-                    '<p>Writing database: ' + formatBytes(job.processed) + ' / ' + formatBytes(job.total) + '</p>' +
+                    '<p>' + fmt(I18N.writingDatabase, { done: formatBytes(job.processed), total: formatBytes(job.total) }) + '</p>' +
                     progressBar(frac) +
                     etaLine(frac, job.started_at);
             } else if (job.phase === 'validating') {
-                content.innerHTML = indeterminateLine('Validating the uploaded file');
+                content.innerHTML = indeterminateLine(I18N.validatingFile);
             } else if (job.phase === 'replacing') {
-                content.innerHTML = indeterminateLine('Replacing the database');
+                content.innerHTML = indeterminateLine(I18N.replacingDatabase);
             } else if (job.phase === 'migrating') {
-                content.innerHTML = indeterminateLine('Updating database schema if needed');
+                content.innerHTML = indeterminateLine(I18N.updatingSchema);
             } else if (job.phase === 'done') {
-                content.innerHTML = '<p>Database imported successfully - everything currently in the app was replaced by the uploaded file.</p>';
+                content.innerHTML = '<p>' + I18N.dbImportSuccess + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
-                content.innerHTML = '<p style="color:#e6194b;">Import failed: ' + job.error + '</p>';
+                content.innerHTML = '<p style="color:#e6194b;">' + fmt(I18N.importFailed, { error: job.error }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             }
         }
@@ -455,19 +445,11 @@
                 // proxy to reject.
                 var INGRESS_SAFE_LIMIT = 15 * 1024 * 1024;
                 if (isIngress && file.size > INGRESS_SAFE_LIMIT) {
-                    alert(
-                        'This file is ' + (file.size / (1024 * 1024)).toFixed(1) + 'MB - larger than ' +
-                        'Home Assistant\'s ingress can handle (about 16MB). Importing it here would ' +
-                        'hang or fail partway through instead of actually working.\n\n' +
-                        'Use port 8000 instead for this import specifically, e.g.\n' +
-                        'http://<your-ha-host>:8000/manage\n\n' +
-                        '(not port 8123 - that\'s Home Assistant\'s own port and still goes ' +
-                        'through the same ingress limit even on your local network)'
-                    );
+                    alert(fmt(I18N.ingressSizeAlert, { size: (file.size / (1024 * 1024)).toFixed(1) }));
                     return;
                 }
 
-                if (!window.confirm('This REPLACES everything currently in this app with the uploaded database. Continue?')) {
+                if (!window.confirm(I18N.dbReplaceConfirm)) {
                     return;
                 }
 
@@ -478,16 +460,16 @@
                 var uploadStartedAt = Date.now() / 1000;
 
                 panel.style.display = 'block';
-                content.innerHTML = '<p>Uploading&hellip;</p>' + progressBar(0);
+                content.innerHTML = '<p>' + I18N.uploading + '</p>' + progressBar(0);
 
                 xhr.upload.addEventListener('progress', function (evt) {
                     if (!evt.lengthComputable) {
-                        content.innerHTML = indeterminateLine('Uploading');
+                        content.innerHTML = indeterminateLine(I18N.uploadingBare);
                         return;
                     }
                     var frac = evt.loaded / evt.total;
                     content.innerHTML =
-                        '<p>Uploading: ' + formatBytes(evt.loaded) + ' / ' + formatBytes(evt.total) + '</p>' +
+                        '<p>' + fmt(I18N.uploadingProgress, { done: formatBytes(evt.loaded), total: formatBytes(evt.total) }) + '</p>' +
                         progressBar(frac) +
                         etaLine(frac, uploadStartedAt);
                 });
@@ -500,20 +482,20 @@
                         // whatever the server said instead of assuming
                         // success and starting to poll for a job that
                         // never actually started.
-                        content.innerHTML = xhr.responseText || '<p style="color:#e6194b;">Import failed.</p>';
+                        content.innerHTML = xhr.responseText || ('<p style="color:#e6194b;">' + I18N.importFailedGeneric + '</p>');
                         return;
                     }
                     // Upload finished - the server has (or is about to
                     // have) started its background job. Switch to polling
                     // its status for the write/validate/replace/migrate
                     // phases that happen after the upload completes.
-                    content.innerHTML = indeterminateLine('Processing');
+                    content.innerHTML = indeterminateLine(I18N.processing);
                     pollServerStatus();
                     pollTimer = setInterval(pollServerStatus, 1000);
                 });
 
                 xhr.addEventListener('error', function () {
-                    content.innerHTML = '<p style="color:#e6194b;">Upload failed - check your connection and try again.</p>';
+                    content.innerHTML = '<p style="color:#e6194b;">' + I18N.uploadFailed + '</p>';
                 });
 
                 xhr.open('POST', '{{ base_path }}/manage/import-db', true);
@@ -547,13 +529,13 @@
             if (job.phase === 'matching') {
                 var frac = job.total > 0 ? job.done / job.total : 0;
                 content.innerHTML = job.total > 0
-                    ? '<p>Comparing activities: ' + job.done + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
-                    : indeterminateLine('Getting started');
+                    ? '<p>' + fmt(I18N.comparingActivities, { done: job.done, total: job.total }) + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine(I18N.gettingStarted);
             } else if (job.phase === 'done') {
-                content.innerHTML = '<p>Recompute finished.</p>';
+                content.innerHTML = '<p>' + I18N.recomputeFinished + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
-                content.innerHTML = '<p style="color:#e6194b;">Recompute failed: ' + job.error + '</p>';
+                content.innerHTML = '<p style="color:#e6194b;">' + fmt(I18N.recomputeFailed, { error: job.error }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             }
         }
@@ -591,7 +573,7 @@
             var anyChecked = form.querySelectorAll('input[name="from_types"]:checked').length > 0;
             if (!anyChecked) {
                 e.preventDefault();
-                window.alert('Pick at least one type to merge from.');
+                window.alert(I18N.pickTypeAlert);
             }
         });
     })();
@@ -612,16 +594,17 @@
             if (job.phase === 'renaming') {
                 var frac = job.total > 0 ? job.processed / job.total : 0;
                 content.innerHTML = job.total > 0
-                    ? '<p>Renaming: ' + job.processed + ' / ' + job.total + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
-                    : indeterminateLine('Getting started');
+                    ? '<p>' + fmt(I18N.renaming, { done: job.processed, total: job.total }) + '</p>' + progressBar(frac) + etaLine(frac, job.started_at)
+                    : indeterminateLine(I18N.gettingStarted);
             } else if (job.phase === 'done') {
-                content.innerHTML =
-                    '<p><strong>' + job.renamed + '</strong> renamed, ' +
-                    '<strong>' + job.failed + '</strong> could not be located' +
-                    (job.skipped_no_gps ? ', <strong>' + job.skipped_no_gps + '</strong> skipped (no GPS track)' : '') + '.</p>';
+                content.innerHTML = '<p>' + fmt(I18N.renameDone, {
+                    renamed: '<strong>' + job.renamed + '</strong>',
+                    failed: '<strong>' + job.failed + '</strong>',
+                    skipped: job.skipped_no_gps ? fmt(I18N.renameSkippedFragment, { count: '<strong>' + job.skipped_no_gps + '</strong>' }) : ''
+                }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             } else if (job.phase === 'error') {
-                content.innerHTML = '<p style="color:#e6194b;">Rename failed: ' + job.error + '</p>';
+                content.innerHTML = '<p style="color:#e6194b;">' + fmt(I18N.renameFailed, { error: job.error }) + '</p>';
                 if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
             }
         }

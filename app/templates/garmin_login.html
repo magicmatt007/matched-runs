@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% set base_path = request.headers.get('X-Ingress-Path', '') %}
-{% block title %}Connect Garmin{% endblock %}
+{% block title %}{{ t(request, "garmin_login.title") }}{% endblock %}
 {% block content %}
 
-<a href="{{ base_path }}/manage">&larr; back</a>
-<h2>Connect Garmin</h2>
+<a href="{{ base_path }}/manage">&larr; {{ t(request, "common.back") }}</a>
+<h2>{{ t(request, "garmin_login.title") }}</h2>
 
 {% if error %}
 <p style="color:#e6194b;">{{ error }}</p>
@@ -13,25 +13,23 @@
 {% if step == "credentials" %}
 <form action="{{ base_path }}/garmin/login/start" method="post" class="panel">
     <div class="row">
-        <label for="email">Garmin email</label>
+        <label for="email">{{ t(request, "garmin_login.email_label") }}</label>
         <input type="email" name="email" id="email" value="{{ default_email or '' }}" required>
     </div>
     <div class="row" style="margin-top: 8px;">
-        <label for="password">Garmin password</label>
+        <label for="password">{{ t(request, "garmin_login.password_label") }}</label>
         <input type="password" name="password" id="password" required>
     </div>
-    <button type="submit" style="margin-top: 12px;">Log in</button>
+    <button type="submit" style="margin-top: 12px;">{{ t(request, "garmin_login.submit") }}</button>
 </form>
-<p class="muted">Your password is only used to complete this login and isn't
-    stored anywhere - only the resulting session token is kept, valid for
-    roughly a year before you'd need to log in again.</p>
+<p class="muted">{{ t(request, "garmin_login.password_note") }}</p>
 
 {% elif step == "mfa" %}
 <form action="{{ base_path }}/garmin/login/mfa" method="post" class="panel">
     <input type="hidden" name="mfa_token" value="{{ mfa_token }}">
-    <label for="mfa_code">Enter the MFA code Garmin just sent you</label>
+    <label for="mfa_code">{{ t(request, "garmin_login.mfa_label") }}</label>
     <input type="text" name="mfa_code" id="mfa_code" autocomplete="one-time-code" required>
-    <button type="submit" style="margin-top: 12px;">Verify</button>
+    <button type="submit" style="margin-top: 12px;">{{ t(request, "garmin_login.verify") }}</button>
 </form>
 {% endif %}
 

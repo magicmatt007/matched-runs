@@ -714,6 +714,39 @@ templates.env.globals["t"] = i18n.t
 templates.env.globals["locale"] = i18n.resolve_locale
 
 
+def _job_status_response(request: Request, job: dict) -> dict:
+    """Returns a background job's status dict ready for JSON polling,
+    translating job["error_key"] (set by a worker thread, which has no
+    request of its own to resolve a locale from - see app/i18n.py) into a
+    real job["error"] string using *this* request's locale instead. Every
+    /manage/*-status endpoint is polled by the same browser session that
+    started the job, so translating at serve time rather than at job-start
+    time makes no practical difference and keeps the worker thread itself
+    request-agnostic."""
+    job = dict(job)
+    if job.get("error_key"):
+        job["error"] = i18n.t(request, job["error_key"], **job.get("error_params", {}))
+    return job
+
+
+def _job_conflict_response(request: Request, job_name_key: str, extra: bool = False) -> HTMLResponse:
+    """The shared "a job of this kind is already running" 409 response
+    every /manage POST route returns if you try to start a second one
+    while the first is still going - same wording everywhere except which
+    job it names, and the one extra clause the import route adds."""
+    prefix = ingress_prefix(request)
+    message = i18n.t(
+        request, "manage.job_already_running",
+        job=i18n.t(request, job_name_key),
+        extra=i18n.t(request, "manage.job_already_running_wait_note") if extra else "",
+    )
+    return HTMLResponse(
+        f"<p>{message}</p>"
+        f"<p><a href='{prefix}/manage'>{i18n.t(request, 'common.back')}</a></p>",
+        status_code=409,
+    )
+
+
 def _group_activity_counts(db: Session, group_ids=None):
     """Returns {group_id: count} via a single GROUP BY query, instead of
     lazy-loading each group's .activities relationship one at a time (a
@@ -810,14 +843,7 @@ def import_status():
 @app.post("/upload")
 async def upload_gpx(request: Request):
     if _current_import_job.get("active"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>An import is already running. Check the Import &amp; Sync "
-            "page for its progress, and wait for it to finish before "
-            "starting another.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=409,
-        )
+        return _job_conflict_response(request, "manage.job_name_import", extra=True)
 
     # FastAPI's default File(...) injection caps multipart requests at 1000
     # files/fields as a DoS safeguard. Years of activity history easily
@@ -1770,13 +1796,7 @@ def _run_rebuild_sync(job):
 @app.post("/rebuild")
 async def rebuild(request: Request):
     if _current_rebuild_job.get("active"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>A recompute is already running. Check the Import &amp; "
-            "Sync page for its progress.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=409,
-        )
+        return _job_conflict_response(request, "manage.job_name_recompute")
     _current_rebuild_job.clear()
     _current_rebuild_job.update({
         "active": True,
@@ -1814,7 +1834,12 @@ def _run_db_import_sync(content: bytes, job):
     try:
         if not content.startswith(b"SQLite format 3\x00"):
             job["phase"] = "error"
-            job["error"] = "That doesn't look like a valid SQLite database file."
+            # This worker runs on a background thread with no request of
+            # its own to resolve a locale from (see app/i18n.py's module
+            # docstring) - it stores an untranslated key instead, and the
+            # GET status endpoint below (which does have a request)
+            # translates it into job["error"] at serve time.
+            job["error_key"] = "manage.error_invalid_sqlite"
             return
 
         # Write in chunks (rather than one f.write(content) call) so we can
@@ -1842,7 +1867,8 @@ def _run_db_import_sync(content: bytes, job):
         except Exception as e:
             os.remove(tmp_path)
             job["phase"] = "error"
-            job["error"] = f"Couldn't read that file as a SQLite database: {e}"
+            job["error_key"] = "manage.error_sqlite_read_failed"
+            job["error_params"] = {"error": str(e)}
             return
         t_validate_done = time.time()
         logger.info("[db-import] validated in %.2fs", t_validate_done - t_write_done)
@@ -1850,7 +1876,7 @@ def _run_db_import_sync(content: bytes, job):
         if "activities" not in tables:
             os.remove(tmp_path)
             job["phase"] = "error"
-            job["error"] = "That SQLite file doesn't look like a Matched Runs database (missing the expected tables)."
+            job["error_key"] = "manage.error_not_matched_runs_db"
             return
 
         # Close existing connections before swapping the file out from
@@ -1969,13 +1995,7 @@ def _extract_single_file_part(raw_body: bytes, boundary: bytes):
 @app.post("/manage/import-db")
 async def import_db(request: Request):
     if _current_db_import_job.get("active"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>A database import is already running. Check the Import "
-            "&amp; Sync page for its progress.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=409,
-        )
+        return _job_conflict_response(request, "manage.job_name_database_import")
 
     t_request_start = time.time()
     logger.info("[db-import] request received")
@@ -2048,11 +2068,12 @@ async def import_db(request: Request):
     if content is None:
         _current_db_import_job["active"] = False
         _current_db_import_job["phase"] = "error"
-        _current_db_import_job["error"] = "Couldn't find the uploaded file in the request."
+        error_message = i18n.t(request, "manage.error_no_uploaded_file")
+        _current_db_import_job["error"] = error_message
         prefix = ingress_prefix(request)
         return HTMLResponse(
-            "<p>Couldn't find the uploaded file in the request.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
+            f"<p>{error_message}</p>"
+            f"<p><a href='{prefix}/manage'>{i18n.t(request, 'common.back')}</a></p>",
             status_code=400,
         )
 
@@ -2071,8 +2092,8 @@ async def import_db(request: Request):
 
 
 @app.get("/manage/db-import-status")
-def db_import_status():
-    return _current_db_import_job
+def db_import_status(request: Request):
+    return _job_status_response(request, _current_db_import_job)
 
 
 # ---------------- Rename activities by city ----------------
@@ -2204,13 +2225,7 @@ def _run_rename_activities_sync(job):
 @app.post("/rename-activities")
 async def rename_activities_route(request: Request):
     if _current_rename_job.get("active"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>A rename job is already running. Check the Import &amp; "
-            "Sync page for its progress.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=409,
-        )
+        return _job_conflict_response(request, "manage.job_name_rename")
     _current_rename_job.clear()
     _current_rename_job.update({
         "active": True,
@@ -2255,13 +2270,8 @@ def strava_callback(request: Request, code: str = None, error: str = None, scope
     if not scope or "activity:read_all" not in scope:
         prefix = ingress_prefix(request)
         return HTMLResponse(
-            "<p>Strava did not grant the <code>activity:read_all</code> permission "
-            f"(granted scope: <code>{scope}</code>).</p>"
-            "<p>This usually happens when this app was authorized before with a "
-            "narrower scope, and Strava is silently reusing that old grant. Fix: "
-            "go to <a href='https://www.strava.com/settings/apps' target='_blank'>"
-            "strava.com/settings/apps</a>, revoke access for this app, then "
-            f"<a href='{prefix}/strava/login'>connect again</a>.</p>",
+            f"<p>{i18n.t(request, 'strava.scope_denied', scope=scope)}</p>"
+            f"<p>{i18n.t(request, 'strava.scope_denied_fix', login_url=f'{prefix}/strava/login')}</p>",
             status_code=400,
         )
 
@@ -2310,12 +2320,8 @@ def strava_sync(request: Request, db: Session = Depends(get_db)):
         prefix = ingress_prefix(request)
         return HTMLResponse(
             f"<p>{e}</p>"
-            "<p>Your stored Strava connection was cleared. Please "
-            f"<a href='{prefix}/strava/login'>connect Strava</a> again — if this keeps "
-            "happening, also revoke the app at "
-            "<a href='https://www.strava.com/settings/apps' target='_blank'>"
-            "strava.com/settings/apps</a> first, then reconnect.</p>"
-            f"<p><a href='{prefix}/'>back</a></p>",
+            f"<p>{i18n.t(request, 'strava.auth_cleared', login_url=f'{prefix}/strava/login')}</p>"
+            f"<p><a href='{prefix}/'>{i18n.t(request, 'common.back')}</a></p>",
             status_code=401,
         )
 
@@ -2541,13 +2547,7 @@ def _run_garmin_sync_background(job):
 @app.post("/garmin/sync")
 async def garmin_sync_route(request: Request):
     if _current_garmin_sync_job.get("active"):
-        prefix = ingress_prefix(request)
-        return HTMLResponse(
-            "<p>A Garmin sync is already running. Check the Import &amp; Sync "
-            "page for its progress.</p>"
-            f"<p><a href='{prefix}/manage'>back</a></p>",
-            status_code=409,
-        )
+        return _job_conflict_response(request, "manage.job_name_garmin_sync")
     if not (garmin_client.is_configured() or garmin_client.has_saved_session()):
         return local_redirect(request, "/manage")
 
