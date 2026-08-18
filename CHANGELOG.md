@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.17.18
+- Added a language picker to the nav bar - the real fix for choosing the
+  app's language, working identically standalone and under Home Assistant
+  (unlike HA's own per-user frontend language, which an ingress'd app has
+  no way to see - see 1.17.17). Picking a language sets a long-lived
+  cookie (`/set-locale`) that from now on takes priority over both the
+  browser's Accept-Language and the 1.17.17 `locale` config option, so
+  e.g. two people sharing one instance can each pick their own. An "Auto"
+  option clears the cookie back to browser-detected behavior. Each
+  language is shown in itself (e.g. "Deutsch", not "German" while browsing
+  in English) - the point of a language picker is finding your own
+  language, not reading about it in another one.
+  - Verified end-to-end: cookie set/cleared correctly via curl, correct
+    precedence over an explicit Accept-Language header, redirect-back
+    preserves the original path+query from Referer, and interactively in
+    a real browser - picking German switches the whole page immediately,
+    persists across navigation, and even the "Auto" option's own label
+    is translated ("Automatisch" once already in German).
+
+## 1.17.17
+- Added a `locale` option to the Home Assistant add-on's Configuration tab
+  (a language dropdown, currently English/German). Without it, the app's
+  language follows the browser's `Accept-Language` header (see
+  app/i18n.py), which is *not* the same thing as Home Assistant's own
+  per-user frontend language (Profile -> Language): that's a client-side
+  HA setting that's never sent to an ingress'd app in any header - HA's
+  ingress proxy forwards your browser's real Accept-Language unchanged,
+  same as any reverse proxy, so this app has no way to see what language
+  you picked *inside* HA. Setting `locale` pins the app's language
+  explicitly regardless of what the browser sends - same `LOCALE` env var
+  override docker-compose users already had via `.env`, now reachable
+  from the Supervisor UI too (`docker_entrypoint.py` already exports every
+  configured option as an upper-cased env var, so no code change was
+  needed beyond declaring the option itself).
+
 ## 1.17.16
 - Table headers can now wrap onto a second line instead of forcing the
   whole table wider. `.table th, .table td` shared a blanket

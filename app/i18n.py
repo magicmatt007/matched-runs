@@ -38,6 +38,31 @@ def _load_translations() -> dict:
 _translations = _load_translations()
 SUPPORTED_LOCALES = sorted(_translations)
 
+LOCALE_COOKIE_NAME = "locale"
+
+# A language's own name, shown in itself rather than translated into
+# whatever locale happens to be active right now - how every language
+# picker does it (nobody wants to hunt for their language spelled in a
+# language they don't read). Keep in sync with SUPPORTED_LOCALES; a
+# locale missing here just falls back to showing its bare code.
+LOCALE_NAMES = {
+    "en": "English",
+    "de": "Deutsch",
+}
+
+
+def locale_name(code: str) -> str:
+    return LOCALE_NAMES.get(code, code)
+
+
+def cookie_locale(request: Request) -> str:
+    """The raw locale cookie value, unvalidated and possibly empty/unset -
+    used by the language-picker UI to know which option to preselect.
+    Unlike resolve_locale(), this doesn't fall back to anything; a blank
+    result means "no explicit per-browser choice made yet", which the
+    picker renders as "Auto"."""
+    return request.cookies.get(LOCALE_COOKIE_NAME, "")
+
 
 def _lookup(dotted_key: str, locale: str):
     """Nested dict lookup for a "section.subsection.key"-style key.
@@ -66,13 +91,29 @@ def _plural_suffix(count: int, locale: str) -> str:
 
 
 def resolve_locale(request: Request) -> str:
-    """Picks the best supported locale for this request.
+    """Picks the best supported locale for this request, most specific
+    choice first:
 
-    LOCALE, if set, pins the instance to one language regardless of the
-    browser - the same override-a-setting pattern the rest of this app's
-    config already follows (see docker_entrypoint.py). Otherwise this
-    parses Accept-Language (q-value aware) and falls back to English.
+    1. The locale cookie - an explicit, per-browser choice made via the
+       language picker in the nav bar (see /set-locale in main.py).
+       Deliberately checked before the instance-wide LOCALE override
+       below: a household with two people using two languages should
+       each get their own, without one overriding the other.
+    2. LOCALE, if set - pins the instance's *default* language regardless
+       of the browser, for anyone who hasn't made an explicit in-app
+       choice yet. Same override-a-setting pattern the rest of this app's
+       config already follows (see docker_entrypoint.py). Originally
+       added for Home Assistant's ingress case, where this app has no way
+       to see the language you picked *inside* HA (see config.yaml) - the
+       cookie-based picker above covers that same case now too, and works
+       standalone as well, but this is kept as a deployment-wide default.
+    3. Accept-Language (q-value aware) - the browser's own setting.
+    4. English.
     """
+    cookie = request.cookies.get(LOCALE_COOKIE_NAME)
+    if cookie in _translations:
+        return cookie
+
     override = os.environ.get("LOCALE")
     if override in _translations:
         return override
