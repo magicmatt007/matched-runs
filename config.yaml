@@ -1,5 +1,5 @@
 name: "Matched Runs"
-version: "1.17.16"
+version: "1.17.17"
 slug: "matched_runs"
 description: >-
   Self-hosted route matching for GPS activities imported from Garmin/Strava -
@@ -51,3 +51,13 @@ schema:
   match_distance_threshold_m: "int"
   match_distance_tolerance: "float"
   match_length_tolerance: "float"
+  # Pins the app's language regardless of the browser's Accept-Language
+  # header - which is what it uses otherwise (see app/i18n.py). Needed
+  # specifically because Home Assistant's own per-user frontend language
+  # (Profile -> Language) is a client-side HA setting, never sent to an
+  # ingress'd app in any header - HA's ingress proxy forwards the browser's
+  # real Accept-Language unchanged, same as any reverse proxy, so this app
+  # has no way to see what language you picked *inside* HA, only what your
+  # actual browser/OS is set to. Keep this option list in sync with
+  # whatever locales exist under app/translations/*.json.
+  locale: "list(en|de)?"
