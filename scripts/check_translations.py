@@ -13,6 +13,13 @@ Loads every app/translations/*.json file and confirms:
      later catch this too, but this script catches it in CI even without
      a reachable Weblate instance.
 
+     Pluralized keys are compared with their CLDR suffix (_zero/_one/_two/
+     _few/_many/_other) stripped first: a locale needing more plural
+     categories than English legitimately has keys English doesn't (e.g.
+     Ukrainian's "_few"/"_many" alongside English's "_one"/"_other" for
+     the same pluralized string - see _plural_suffix() in app/i18n.py),
+     and that's expected, not a typo.
+
 This deliberately does NOT require every en.json key to have a translation
 in every other locale - partial translation coverage is expected and
 supported (t() falls back to English per-key, not per-file), not an error.
@@ -32,6 +39,21 @@ def flatten_keys(node, prefix=""):
             yield from flatten_keys(value, f"{prefix}{key}.")
         return
     yield prefix.rstrip("."), node
+
+
+# Keep in sync with the suffixes _plural_suffix() in app/i18n.py can
+# produce for any locale.
+PLURAL_SUFFIXES = ("_zero", "_one", "_two", "_few", "_many", "_other")
+
+
+def plural_base(key):
+    """Strips a trailing CLDR plural suffix, if present - "foo_few" and
+    "foo_one" both collapse to "foo" for comparison purposes, since
+    they're different plural forms of the same pluralized string."""
+    for suffix in PLURAL_SUFFIXES:
+        if key.endswith(suffix):
+            return key[: -len(suffix)]
+    return key
 
 
 def main():
@@ -60,10 +82,13 @@ def main():
         problems.append("en.json is missing - it's the canonical key set every other locale is checked against")
     else:
         en_keys = set(locales["en"])
+        en_plural_bases = {plural_base(k) for k in en_keys}
         for locale, flat in locales.items():
             if locale == "en":
                 continue
             for key in sorted(set(flat) - en_keys):
+                if plural_base(key) in en_plural_bases:
+                    continue  # a plural form English doesn't need, e.g. Ukrainian's "_few"
                 problems.append(f"{locale}.json: key '{key}' has no matching key in en.json")
 
     print(f"Checked {len(paths)} translation file(s) in {translations_dir}")
