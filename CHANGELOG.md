@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.17.20
+- Fixed month names never being translated - the Training Log page's
+  chart axis, its month-drilldown cards, and its "Month Year" heading
+  all used Python's `datetime.strftime("%B"/"%b")`, which is locale-
+  dependent on the *process's* OS/C-library locale (`LC_TIME`), not this
+  app's own per-request resolved locale. Setting that per-request isn't
+  a real option either - it's global mutable state that would race
+  across concurrent requests/threads, and the container image doesn't
+  ship locale data for every language this app might be translated into
+  anyway. Added `month_name()` to app/i18n.py, backed by ordinary
+  `date.month_1..12` / `date.month_abbr_1..12` keys in the normal
+  translation files, same mechanism as every other piece of UI text -
+  and pointed every strftime("%B"/"%b") call in app/main.py and
+  log.html at it instead. All other strftime formats in the app are
+  purely numeric (%Y-%m-%d etc.) and were never affected.
+  - Verified: full check suite clean; fetched the Training Log page in
+    all three languages and confirmed the chart labels, month cards, and
+    heading are all translated (including that German's "August" and
+    "Mai" correctly stay identical to English by coincidence, not by
+    being silently untranslated); confirmed visually in a real browser.
+
 ## 1.17.19
 - Added Ukrainian (`app/translations/uk.json`, 194/194 strings, added to
   the language picker and the HA `locale` config option's dropdown).

@@ -28,7 +28,7 @@
 <div class="row" style="justify-content: space-between; margin: 16px 0;">
     {% if current_month %}
         <a class="button secondary" data-swipe-nav="prev" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ prev_month }}">&laquo; {{ t(request, "log.previous_month") }}</a>
-        <strong>{{ window_start.strftime("%B %Y") }}</strong>
+        <strong>{{ month_name(request, window_start.month) }} {{ window_start.year }}</strong>
         {% if next_month %}
             <a class="button secondary" data-swipe-nav="next" href="{{ base_path }}/log?type={{ selected_type }}&period=1y&month={{ next_month }}">{{ t(request, "log.next_month") }} &raquo;</a>
         {% else %}
