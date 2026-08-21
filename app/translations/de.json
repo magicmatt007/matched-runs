@@ -225,5 +225,31 @@
         "scope_denied": "Strava hat die Berechtigung <code>activity:read_all</code> nicht erteilt (gewährter Scope: <code>{scope}</code>).",
         "scope_denied_fix": "Das passiert meist, wenn diese App vorher mit einem engeren Scope autorisiert wurde und Strava diese alte Freigabe stillschweigend weiterverwendet. Lösung: Gehe zu <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a>, entziehe dieser App den Zugriff und <a href='{login_url}'>verbinde dich dann erneut</a>.",
         "auth_cleared": "Deine gespeicherte Strava-Verbindung wurde entfernt. Bitte <a href='{login_url}'>verbinde Strava</a> erneut — falls das weiter passiert, entziehe der App vorher auch unter <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a> den Zugriff und verbinde dich danach neu."
+    },
+    "date": {
+        "month_1": "Januar",
+        "month_2": "Februar",
+        "month_3": "März",
+        "month_4": "April",
+        "month_5": "Mai",
+        "month_6": "Juni",
+        "month_7": "Juli",
+        "month_8": "August",
+        "month_9": "September",
+        "month_10": "Oktober",
+        "month_11": "November",
+        "month_12": "Dezember",
+        "month_abbr_1": "Jan",
+        "month_abbr_2": "Feb",
+        "month_abbr_3": "Mär",
+        "month_abbr_4": "Apr",
+        "month_abbr_5": "Mai",
+        "month_abbr_6": "Jun",
+        "month_abbr_7": "Jul",
+        "month_abbr_8": "Aug",
+        "month_abbr_9": "Sep",
+        "month_abbr_10": "Okt",
+        "month_abbr_11": "Nov",
+        "month_abbr_12": "Dez"
     }
 }

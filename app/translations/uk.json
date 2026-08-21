@@ -239,5 +239,31 @@
         "scope_denied": "Strava не надала дозвіл <code>activity:read_all</code> (наданий обсяг: <code>{scope}</code>).",
         "scope_denied_fix": "Зазвичай це трапляється, якщо цей застосунок раніше авторизували з вужчим обсягом дозволів, і Strava мовчки повторно використовує той старий дозвіл. Рішення: перейди на <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a>, відклич доступ для цього застосунку, а потім <a href='{login_url}'>підключися знову</a>.",
         "auth_cleared": "Твоє збережене підключення до Strava видалено. Будь ласка, <a href='{login_url}'>підключи Strava</a> знову — якщо це повторюється, спочатку також відклич доступ застосунку на <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a>, а потім підключися заново."
+    },
+    "date": {
+        "month_1": "Січень",
+        "month_2": "Лютий",
+        "month_3": "Березень",
+        "month_4": "Квітень",
+        "month_5": "Травень",
+        "month_6": "Червень",
+        "month_7": "Липень",
+        "month_8": "Серпень",
+        "month_9": "Вересень",
+        "month_10": "Жовтень",
+        "month_11": "Листопад",
+        "month_12": "Грудень",
+        "month_abbr_1": "Січ",
+        "month_abbr_2": "Лют",
+        "month_abbr_3": "Бер",
+        "month_abbr_4": "Кві",
+        "month_abbr_5": "Тра",
+        "month_abbr_6": "Чер",
+        "month_abbr_7": "Лип",
+        "month_abbr_8": "Сер",
+        "month_abbr_9": "Вер",
+        "month_abbr_10": "Жов",
+        "month_abbr_11": "Лис",
+        "month_abbr_12": "Гру"
     }
 }

@@ -188,3 +188,18 @@ def t(request: Request, key: str, count: int = None, **kwargs) -> str:
     if count is not None:
         kwargs.setdefault("count", count)
     return text.format(**kwargs) if kwargs else text
+
+
+def month_name(request: Request, month: int, abbr: bool = False) -> str:
+    """Translated month name (1-12) for the request's resolved locale.
+
+    Deliberately not datetime.strftime("%B"/"%b"): strftime's month names
+    come from the process's OS/C-library locale (LC_TIME), not this app's
+    own per-request resolved locale - setting that per-request would be
+    global mutable state racing across concurrent requests/threads, and
+    the container image doesn't ship locale data for every language this
+    app might be translated into anyway. Month names go through the same
+    translation table as everything else instead (see app/translations/).
+    """
+    key = f"date.month_abbr_{month}" if abbr else f"date.month_{month}"
+    return t(request, key)

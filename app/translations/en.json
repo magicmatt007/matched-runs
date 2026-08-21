@@ -225,5 +225,31 @@
     "scope_denied": "Strava did not grant the <code>activity:read_all</code> permission (granted scope: <code>{scope}</code>).",
     "scope_denied_fix": "This usually happens when this app was authorized before with a narrower scope, and Strava is silently reusing that old grant. Fix: go to <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a>, revoke access for this app, then <a href='{login_url}'>connect again</a>.",
     "auth_cleared": "Your stored Strava connection was cleared. Please <a href='{login_url}'>connect Strava</a> again — if this keeps happening, also revoke the app at <a href='https://www.strava.com/settings/apps' target='_blank'>strava.com/settings/apps</a> first, then reconnect."
+  },
+  "date": {
+    "month_1": "January",
+    "month_2": "February",
+    "month_3": "March",
+    "month_4": "April",
+    "month_5": "May",
+    "month_6": "June",
+    "month_7": "July",
+    "month_8": "August",
+    "month_9": "September",
+    "month_10": "October",
+    "month_11": "November",
+    "month_12": "December",
+    "month_abbr_1": "Jan",
+    "month_abbr_2": "Feb",
+    "month_abbr_3": "Mar",
+    "month_abbr_4": "Apr",
+    "month_abbr_5": "May",
+    "month_abbr_6": "Jun",
+    "month_abbr_7": "Jul",
+    "month_abbr_8": "Aug",
+    "month_abbr_9": "Sep",
+    "month_abbr_10": "Oct",
+    "month_abbr_11": "Nov",
+    "month_abbr_12": "Dec"
   }
 }

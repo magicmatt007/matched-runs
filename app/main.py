@@ -715,6 +715,7 @@ templates.env.globals["locale"] = i18n.resolve_locale
 templates.env.globals["cookie_locale"] = i18n.cookie_locale
 templates.env.globals["locale_name"] = i18n.locale_name
 templates.env.globals["supported_locales"] = i18n.SUPPORTED_LOCALES
+templates.env.globals["month_name"] = i18n.month_name
 
 
 # ---------------- Locale ----------------
@@ -1640,8 +1641,8 @@ def training_log(request: Request, type: str = None, period: str = "1y",
             key = a.start_time.strftime("%Y-%m")
             g = groups.setdefault(key, {
                 "month": key,
-                "label": a.start_time.strftime("%B %Y"),
-                "chart_label": a.start_time.strftime("%b"),
+                "label": f"{i18n.month_name(request, a.start_time.month)} {a.start_time.year}",
+                "chart_label": i18n.month_name(request, a.start_time.month, abbr=True),
                 "count": 0,
                 "distance_m": 0.0,
             })
@@ -1653,8 +1654,8 @@ def training_log(request: Request, type: str = None, period: str = "1y",
         while cursor <= window_end:
             key = cursor.strftime("%Y-%m")
             groups.setdefault(key, {
-                "month": key, "label": cursor.strftime("%B %Y"),
-                "chart_label": cursor.strftime("%b"), "count": 0, "distance_m": 0.0,
+                "month": key, "label": f"{i18n.month_name(request, cursor.month)} {cursor.year}",
+                "chart_label": i18n.month_name(request, cursor.month, abbr=True), "count": 0, "distance_m": 0.0,
             })
             cursor = _add_months(cursor, 1)
         month_groups = sorted(groups.values(), key=lambda g: g["month"], reverse=True)
@@ -1682,7 +1683,10 @@ def training_log(request: Request, type: str = None, period: str = "1y",
         cursor = window_start.date()
         end_date = window_end.date()
         while cursor <= end_date:
-            chart_data.append({"label": cursor.strftime("%b %d"), "distance_m": by_day.get(cursor, 0.0)})
+            chart_data.append({
+                "label": f"{i18n.month_name(request, cursor.month, abbr=True)} {cursor.day:02d}",
+                "distance_m": by_day.get(cursor, 0.0),
+            })
             cursor += timedelta(days=1)
 
     total_distance_km = sum(a.distance_m or 0 for a in activities) / 1000.0
