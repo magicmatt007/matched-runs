@@ -60,8 +60,16 @@
 
 <script>
 const map = L.map('map');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
+// OSM's tile servers reject (403 "Access blocked") tile requests that
+// carry no Referer header. Home Assistant sends `Referrer-Policy:
+// no-referrer` on its pages (ingress included), which strips it - so set
+// a per-tile policy that still sends just our origin (never the full
+// page URL). Also uses the single tile.openstreetmap.org host; the old
+// {s}.-subdomain URLs are deprecated by OSM.
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+    referrerPolicy: 'strict-origin-when-cross-origin'
 }).addTo(map);
 
 const colors = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#46f0f0','#f032e6','#bcf60c'];
