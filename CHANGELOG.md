@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.17.21
+- Fixed the activity and route-group maps showing OpenStreetMap's
+  "403 Access blocked" tiles instead of the map. OSM's tile servers now
+  reject tile requests with no `Referer` header, and Home Assistant
+  serves its pages (ingress included) with `Referrer-Policy: no-referrer`,
+  which strips it. The tile layer now sets its own
+  `referrerPolicy: 'strict-origin-when-cross-origin'` (Leaflet sets it on
+  each tile `<img>`), so only this app's origin is sent - never the full
+  page URL. Also switched from the deprecated `{s}.tile.openstreetmap.org`
+  subdomains to the single `tile.openstreetmap.org` host OSM now asks for.
+
 ## 1.17.20
 - Fixed month names never being translated - the Training Log page's
   chart axis, its month-drilldown cards, and its "Month Year" heading
